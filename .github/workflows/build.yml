@@ -30,7 +30,7 @@ jobs:
           xcrun -sdk iphoneos clang -arch arm64 -dynamiclib \
             -isysroot "$(xcrun --sdk iphoneos --show-sdk-path)" \
             -miphoneos-version-min=13.0 \
-            -framework UIKit -framework Foundation \
+            -framework UIKit -framework Foundation -framework Security \
             -O2 -fobjc-arc \
             -install_name @executable_path/libveexcore.dylib \
             -o out/libveexcore.dylib src/Veex.m
@@ -97,7 +97,6 @@ jobs:
           UF="$APP/Frameworks/UnityFramework.framework/UnityFramework"
           test -f "$UF" || { echo "sin UnityFramework"; exit 1; }
           otool -l "$UF" | grep -A4 LC_ENCRYPTION_INFO | grep cryptid
-          echo "$APP" >> "$GITHUB_ENV"
 
       - name: Inyectar
         run: |
@@ -106,7 +105,6 @@ jobs:
           git clone -q --depth 1 https://github.com/Tyilo/insert_dylib.git /tmp/idl
           cd /tmp/idl && xcodebuild -quiet -configuration Release >/dev/null 2>&1
           IDL=$(find /tmp/idl -name insert_dylib -type f -perm +111 | head -1)
-          APP=$(grep -m1 '^/' "$GITHUB_ENV" | sed 's/^APP=//' || true)
           APP=$(ls -d "$GITHUB_WORKSPACE"/work/app/Payload/*.app | head -1)
           UF="$APP/Frameworks/UnityFramework.framework/UnityFramework"
           cp "$GITHUB_WORKSPACE/out/libveexcore.dylib" "$APP/Frameworks/UnityFramework.framework/libveexcore.dylib"
