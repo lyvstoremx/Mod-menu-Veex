@@ -41,14 +41,15 @@ jobs:
           set -u
           mkdir -p "$RUNNER_TEMP/ipa"
           cd "$RUNNER_TEMP/ipa"
-          API=https://api.github.com/repos/majd/ipatool/releases/latest
-          ASSET=$(curl -sL $API | grep -o '"browser_download_url":[^,]*' | grep -i macos | grep -i arm64 | head -1 | sed 's/.*"\(https[^"]*\)".*/\1/') || true
-          if [ -z "${ASSET:-}" ]; then
-            ASSET=$(curl -sL $API | grep -o '"browser_download_url":[^,]*' | grep -i macos | head -1 | sed 's/.*"\(https[^"]*\)".*/\1/') || true
+          BASE=https://github.com/majd/ipatool/releases/download/v2.7.0
+          if ! curl -fsSL "$BASE/ipatool-2.7.0-macos-arm64.tar.gz" -o ipatool.tar.gz; then
+            echo "arm64 fallo, probando amd64"
+            curl -fsSL "$BASE/ipatool-2.7.0-macos-amd64.tar.gz" -o ipatool.tar.gz
           fi
-          curl -sL "$ASSET" -o ipatool.tar.gz
-          tar xzf ipatool.tar.gz || true
+          test -s ipatool.tar.gz || { echo "descarga vacia"; exit 1; }
+          tar xzf ipatool.tar.gz
           BIN=$(find . -type f ! -name '*.tar.gz' | head -1)
+          echo "bin: $BIN"
           cp "$BIN" ./ipatool
           chmod +x ./ipatool
           ./ipatool --version
