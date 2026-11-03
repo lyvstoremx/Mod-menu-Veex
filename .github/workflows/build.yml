@@ -1,6 +1,10 @@
 name: Prueba
 on:
   workflow_dispatch:
+    inputs:
+      ipa_url:
+        description: "URL del IPA (asset del Release)"
+        required: true
 
 jobs:
   build:
@@ -8,60 +12,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Bajar IPA
+      - name: Bajar
+        env:
+          U: ${{ inputs.ipa_url }}
         run: |
-          set -uo pipefail
+          set -euo pipefail
           mkdir -p work
-          python3 -m pip install --quiet --break-system-packages requests
-          python3 - <<'PY'
-          import re, sys, time, requests
-          KEY = "od7voveps5u10c1"
-          H = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"}
-          link = None
-          try:
-              r = requests.get("https://www.mediafire.com/api/1.5/file/get_links.php",
-                               params={"quick_key": KEY, "link_type": "direct_download",
-                                       "response_format": "json"}, headers=H, timeout=40)
-              for it in r.json().get("response", {}).get("links", []):
-                  if it.get("direct_download"):
-                      link = it["direct_download"]; break
-          except Exception as e:
-              print("api: %s" % e)
-          if not link:
-              for i in range(6):
-                  try:
-                      r = requests.get("https://www.mediafire.com/file/%s/file" % KEY,
-                                       headers=H, timeout=40)
-                      print("pagina %d: %d bytes" % (i + 1, len(r.text)))
-                      m = re.search(r'https?://download[0-9]*\.mediafire\.com/[^"\'\s<>\\]+',
-                                    r.text.replace("\\/", "/"))
-                      if m:
-                          link = m.group(0); break
-                  except Exception as e:
-                      print("intento %d: %s" % (i + 1, e))
-                  time.sleep(5)
-          if not link:
-              print("sin enlace"); sys.exit(1)
-          print("ok: %s" % link.split("?")[0])
-          r = requests.get(link, headers=H, timeout=900, stream=True)
-          r.raise_for_status()
-          with open("work/base.ipa", "wb") as f:
-              for c in r.iter_content(1 << 16): f.write(c)
-          PY
+          curl -sSL "$U" -o work/base.ipa
           ls -la work/
 
       - name: Desempacar
         run: |
           set -euo pipefail
           cd work && unzip -q base.ipa -d app
-          echo "APP=$PWD/app/Payload/$(ls app/Payload)" >> $GITHUB_ENV
+          APP="$PWD/app/Payload/$(ls app/Payload)"
+          echo "APP=$APP" >> $GITHUB_ENV
+          echo "TARGET=$APP/Frameworks/UnityFramework.framework/UnityFramework" >> $GITHUB_ENV
 
       - name: Compilar
         run: |
           set -euo pipefail
           xcrun -sdk iphoneos clang -arch arm64 -dynamiclib \
             -isysroot "$(xcrun --sdk iphoneos --show-sdk-path)" \
-            -miphoneos-version-min=15.0 -framework Foundation \
+            -miphoneos-version-min=15.0 \
+            -framework UIKit -framework Foundation \
             -install_name @executable_path/Frameworks/libveexcore.dylib \
             -o work/libveexcore.dylib src/Veex.m
 
@@ -69,17 +43,22 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m pip install --quiet --break-system-packages lief
-          EXE="$APP/$(basename "$APP" .app)"
+          test -f "$TARGET" || { echo "sin UnityFramework"; exit 1; }
           python3 -c "
           import lief, sys
           b = lief.parse(sys.argv[1]); b.add_library('libveexcore.dylib'); b.write(sys.argv[1])
-          " "$EXE"
+          " "$TARGET"
           mkdir -p "$APP/Frameworks"
           cp work/libveexcore.dylib "$APP/Frameworks/"
-          /usr/libexec/PlistBuddy -c "Add :UIFileSharingEnabled bool true" "$APP/Info.plist" 2>/dev/null || true
           rm -rf "$APP/_CodeSignature"
           codesign --force --sign - "$APP/Frameworks/libveexcore.dylib"
+          codesign --force --sign - "$APP/Frameworks/UnityFramework.framework"
           codesign --force --sign - "$APP"
+
+      - name: Verificar
+        run: |
+          set -uo pipefail
+          otool -L "$TARGET" | grep -i veex || echo "SIN LC_LOAD"
 
       - name: Empaquetar
         run: |
