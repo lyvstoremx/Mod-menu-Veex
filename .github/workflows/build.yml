@@ -66,9 +66,13 @@ jobs:
         run: |
           set -euo pipefail
           cd work && unzip -q base.ipa -d app
-          APP="$PWD/app/Payload/$(ls app/Payload)"
+          APP=$(ls -d "$PWD"/app/Payload/*.app | head -1)
+          test -n "$APP" || { echo "sin .app"; exit 1; }
+          echo "app: $APP"
           echo "APP=$APP" >> $GITHUB_ENV
-          echo "TARGET=$APP/Frameworks/UnityFramework.framework/UnityFramework" >> $GITHUB_ENV
+          TARGET="$APP/Frameworks/UnityFramework.framework/UnityFramework"
+          echo "target: $TARGET"
+          echo "TARGET=$TARGET" >> $GITHUB_ENV
 
       - name: Compilar
         run: |
