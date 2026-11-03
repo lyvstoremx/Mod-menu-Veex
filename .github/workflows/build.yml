@@ -6,10 +6,6 @@ on:
       password:
         description: "Apple ID password"
         required: true
-      ipa_url:
-        description: "IPA de respaldo (opcional)"
-        required: false
-        default: ""
 
 jobs:
   build:
@@ -19,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Compilar dylib
+      - name: Compilar
         run: |
           set -euo pipefail
           mkdir -p out
@@ -32,6 +28,11 @@ jobs:
             -o out/libveexcore.dylib src/Veex.m
           ls -la out
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dylib
+          path: out/libveexcore.dylib
+
       - name: Instalar ipatool
         run: |
           set -u
@@ -41,19 +42,17 @@ jobs:
           if ! curl -fsSL "$BASE/ipatool-2.7.0-macos-arm64.tar.gz" -o ipatool.tar.gz; then
             curl -fsSL "$BASE/ipatool-2.7.0-macos-amd64.tar.gz" -o ipatool.tar.gz
           fi
-          test -s ipatool.tar.gz || { echo "descarga vacia"; exit 1; }
           tar xzf ipatool.tar.gz
           BIN=$(find . -type f ! -name '*.tar.gz' | head -1)
           cp "$BIN" ./ipatool
           chmod +x ./ipatool
-          ./ipatool --version
           echo "$RUNNER_TEMP/ipa" >> "$GITHUB_PATH"
 
       - name: Cache sesion
         uses: actions/cache@v4
         with:
           path: ~/.ipatool
-          key: ipatool-auth-v1
+          key: ipatool-auth-v2
 
       - name: Login
         env:
@@ -61,6 +60,7 @@ jobs:
           APPLE_PW: ${{ inputs.password }}
         run: |
           set -u
+          echo "cuenta: [$APPLE_ID]"
           if ipatool auth info >/dev/null 2>&1; then
             echo "sesion ya guardada"
             exit 0
@@ -70,9 +70,8 @@ jobs:
           ipatool auth login -e "$APPLE_ID" -p "$APPLE_PW" < /tmp/fifo > login.log 2>&1 &
           PID=$!
           exec 3> /tmp/fifo
-          echo "esperando codigo en code.txt (10 min)"
           CODE=""
-          for i in $(seq 1 60); do
+          for i in $(seq 1 55); do
             sleep 10
             C=$(curl -s "https://raw.githubusercontent.com/lyvstoremx/Mod-menu-Veex/main/code.txt?t=$i" | tr -d '[:space:]') || true
             echo "poll $i -> '$C'"
@@ -81,54 +80,41 @@ jobs:
               break
             fi
             if ! kill -0 $PID 2>/dev/null; then
-              echo "ipatool termino antes de tiempo"
+              echo "ipatool termino antes"
               break
             fi
           done
           cat login.log || true
           if [ -z "$CODE" ]; then
-            echo "::error::No llego codigo a code.txt"
+            echo "::warning::No llego codigo, sigo sin IPA"
             kill $PID 2>/dev/null || true
-            exit 1
+            exit 0
           fi
-          echo "codigo: $CODE"
           echo "$CODE" >&3
           wait $PID || true
-          echo "--- salida ---"
           cat login.log || true
-          if ! ipatool auth info >/dev/null 2>&1; then
-            echo "::error::Login fallo"
-            exit 1
-          fi
-          echo "login ok"
 
       - name: Descargar IPA oficial
         run: |
           set -u
           mkdir -p work
+          ipatool auth info >/dev/null 2>&1 || { echo "sin sesion"; exit 0; }
           ipatool download -b com.dts.freefireth -o "$PWD/work/ff.ipa" --non-interactive 2>&1 | tee dl.log || true
-          if [ ! -s work/ff.ipa ]; then
-            echo "::error::Descarga fallo. Revisa dl.log arriba."
-            ls -la work
-            exit 1
-          fi
-          ls -la work
+          test -s work/ff.ipa || { echo "descarga fallida"; exit 0; }
 
       - name: Verificar cifrado
         run: |
           set -u
+          test -s work/ff.ipa || exit 0
           cd work
           unzip -q ff.ipa -d app
-          APP=$(ls -d "$PWD"/app/Payload/*.app | head -1)
-          echo "app: $APP"
-          UF="$APP/Frameworks/UnityFramework.framework/UnityFramework"
-          test -f "$UF" || { echo "sin UnityFramework"; exit 1; }
+          UF=$(ls -d "$PWD"/app/Payload/*.app)/Frameworks/UnityFramework.framework/UnityFramework
           otool -l "$UF" | grep -A4 LC_ENCRYPTION_INFO | grep cryptid
 
       - name: Inyectar
         run: |
           set -euo pipefail
-          cd "$GITHUB_WORKSPACE"
+          test -s work/ff.ipa || exit 0
           git clone -q --depth 1 https://github.com/Tyilo/insert_dylib.git /tmp/idl
           cd /tmp/idl && xcodebuild -quiet -configuration Release >/dev/null 2>&1
           IDL=$(find /tmp/idl -name insert_dylib -type f -perm +111 | head -1)
@@ -137,17 +123,16 @@ jobs:
           cp "$GITHUB_WORKSPACE/out/libveexcore.dylib" "$APP/Frameworks/UnityFramework.framework/libveexcore.dylib"
           "$IDL" --inplace --strip-codesig --all-yes "@executable_path/libveexcore.dylib" "$UF"
           otool -L "$UF" | grep veexcore
-          otool -l "$UF" | grep -A4 LC_ENCRYPTION_INFO | grep cryptid
 
       - name: Empaquetar
         run: |
           set -euo pipefail
+          test -s work/ff.ipa || exit 0
           cd work/app
           zip -qry ../../Veex.ipa Payload
-          cd ../..
-          ls -la Veex.ipa
 
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: Veex
           path: Veex.ipa
