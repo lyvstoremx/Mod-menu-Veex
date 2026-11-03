@@ -65,6 +65,15 @@ static NSString *VXPost(NSString *url, NSString *txt) {
     return out;
 }
 
+static BOOL VXEngine(const char *img) {
+    if (!img) return YES;
+    NSString *s = [NSString stringWithUTF8String:img];
+    NSArray *bad = @[@"UnityEngine", @"Firebase", @"mscorlib", @"System", @"Mono",
+                     @"Newtonsoft", @"Google", @"nunit", @"ExCSS"];
+    for (NSString *b in bad) if ([s containsString:b]) return YES;
+    return NO;
+}
+
 static void VXDump(void) {
     fn_domain_get dg = (fn_domain_get)S("il2cpp_domain_get");
     fn_assemblies da = (fn_assemblies)S("il2cpp_domain_get_assemblies");
@@ -76,70 +85,59 @@ static void VXDump(void) {
     fn_cls_ns cs = (fn_cls_ns)S("il2cpp_class_get_namespace");
     fn_cls_methods cm = (fn_cls_methods)S("il2cpp_class_get_methods");
     fn_m_name mn = (fn_m_name)S("il2cpp_method_get_name");
-    fn_cls_fields cf = (fn_cls_fields)S("il2cpp_class_get_fields");
-    fn_f_name fn = (fn_f_name)S("il2cpp_field_get_name");
 
     if (!dg || !da || !ai || !in || !ic || !ig || !cn) {
         VXText(@"sin simbolos il2cpp");
         return;
     }
 
-    NSArray *keys = @[@"Player", @"Weapon", @"Camera", @"Trigger", @"Hit",
-                      @"Damage", @"Fire", @"Shoot", @"Aim", @"Target", @"Enemy"];
-
     NSMutableString *o = [NSMutableString string];
     void *d = dg();
     size_t n = 0;
     void **as = da(d, &n);
-    [o appendFormat:@"ensamblados %zu\n", n];
     if (!as) { VXText(@"sin ensamblados"); return; }
 
-    int matched = 0;
-    for (size_t i = 0; i < n && matched < 80; i++) {
+    [o appendFormat:@"ensamblados %zu\n\n=== LISTA ===\n", n];
+    for (size_t i = 0; i < n; i++) {
         void *a = *(void **)((char *)as + 0x20 + i * 8);
         if (!a) continue;
         void *img = ai(a);
         if (!img) continue;
+        const char *nm = in(img);
+        [o appendFormat:@"%s  (%zu clases)%s\n", nm ? nm : "?",
+            ic ? ic(img) : 0, VXEngine(nm) ? " [motor]" : ""];
+    }
+
+    [o appendString:@"\n=== CLASES DEL JUEGO ===\n"];
+    int shown = 0;
+    for (size_t i = 0; i < n && shown < 400; i++) {
+        void *a = *(void **)((char *)as + 0x20 + i * 8);
+        if (!a) continue;
+        void *img = ai(a);
+        if (!img) continue;
+        const char *nm = in(img);
+        if (VXEngine(nm)) continue;
         size_t cc = ic(img);
-        for (size_t j = 0; j < cc && matched < 80; j++) {
+        [o appendFormat:@"\n--- %s ---\n", nm ? nm : "?"];
+        for (size_t j = 0; j < cc && shown < 400; j++) {
             void *c = ig(img, j);
             if (!c) continue;
             const char *cname = cn(c);
             if (!cname) continue;
-            NSString *full = [NSString stringWithUTF8String:cname];
-            BOOL hit = NO;
-            for (NSString *k in keys) if ([full containsString:k]) { hit = YES; break; }
-            if (!hit) continue;
-            matched++;
+            shown++;
             const char *ns = cs ? cs(c) : NULL;
-            [o appendFormat:@"\n%s::%s\n", ns ? ns : "", cname];
-            if (cm && mn) {
-                void *it = NULL; void *m; int lim = 0;
-                while ((m = cm(c, &it)) && lim++ < 15) {
-                    const char *mn2 = mn(m);
-                    if (mn2) [o appendFormat:@"  m %s\n", mn2];
-                }
-            }
-            if (cf && fn) {
-                void *it = NULL; void *f; int lim = 0;
-                while ((f = cf(c, &it)) && lim++ < 15) {
-                    const char *fn2 = fn(f);
-                    if (fn2) [o appendFormat:@"  f %s\n", fn2];
-                }
-            }
+            if (ns && ns[0]) [o appendFormat:@"%s::%s\n", ns, cname];
+            else [o appendFormat:@"%s\n", cname];
         }
     }
-    [o appendFormat:@"\ntotal %d\n", matched];
+    [o appendFormat:@"\nmostradas %d\n", shown];
 
     [o writeToFile:[NSHomeDirectory() stringByAppendingPathComponent:@"Documents/veex_dump.txt"]
         atomically:YES encoding:NSUTF8StringEncoding error:nil];
 
     NSString *url = VXPost(@"https://paste.rs", o);
-    if (url) {
-        VXText([NSString stringWithFormat:@"subido:\n%@\n\n%@", url, o]);
-    } else {
-        VXText([NSString stringWithFormat:@"no subio\n\n%@", o]);
-    }
+    if (url) VXText([NSString stringWithFormat:@"subido:\n%@\n\n%@", url, o]);
+    else VXText([NSString stringWithFormat:@"no subio\n\n%@", o]);
 }
 
 __attribute__((constructor)) static void VXInit(void) {
