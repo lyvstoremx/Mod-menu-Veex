@@ -1,8 +1,10 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
+#import <Security/Security.h>
 #import <dlfcn.h>
 #import <mach-o/dyld.h>
 #import <string.h>
+#import <stdlib.h>
 
 typedef void  *(*fn_domain_get)(void);
 typedef void **(*fn_assemblies)(void *, size_t *);
@@ -99,7 +101,6 @@ static NSString *VXPost(NSString *url, NSString *txt) {
     r.HTTPMethod = @"POST";
     r.HTTPBody = [txt dataUsingEncoding:NSUTF8StringEncoding];
     [r setValue:@"text/plain; charset=utf-8" forHTTPHeaderField:@"Content-Type"];
-    [r setValue:@"Mozilla/5.0 (iPhone)" forHTTPHeaderField:@"User-Agent"];
     r.timeoutInterval = 25;
     __block NSString *out = nil;
     dispatch_semaphore_t sem = dispatch_semaphore_create(0);
@@ -180,39 +181,126 @@ static void VXDump(void) {
     }
     [o appendFormat:@"\nmostradas %d\n", shown];
 
-    [o writeToFile:[NSHomeDirectory() stringByAppendingPathComponent:@"Documents/veex_dump.txt"]
-        atomically:YES encoding:NSUTF8StringEncoding error:nil];
-
     NSString *url = VXPost(@"https://paste.rs", o);
     if (url) VXText([NSString stringWithFormat:@"subido:\n%@\n\n%@", url, o]);
-    else VXText([NSString stringWithFormat:@"no subio\n\n%@", o]);
+    else VXText([NSString stringWithFormat:@"no subido\n\n%@", o]);
 }
 
-static void VXButton(void) {
+#pragma mark - reset
+
+static int VXKeychainPurge(void) {
+    int n = 0;
+    NSArray *toks = @[@"garena", @"freefire", @"dts", @"shield", @"guest", @"eca"];
+    for (id cls in @[(__bridge id)kSecClassGenericPassword,
+                     (__bridge id)kSecClassInternetPassword]) {
+        NSMutableDictionary *q = [NSMutableDictionary dictionary];
+        q[(__bridge id)kSecClass] = cls;
+        q[(__bridge id)kSecReturnAttributes] = @YES;
+        q[(__bridge id)kSecMatchLimit] = (__bridge id)kSecMatchLimitAll;
+        CFTypeRef res = NULL;
+        if (SecItemCopyMatching((__bridge CFDictionaryRef)q, &res) != errSecSuccess || !res) continue;
+        for (NSDictionary *it in (__bridge_transfer NSArray *)res) {
+            NSString *svc = it[(__bridge id)kSecAttrService] ?: @"";
+            NSString *acc = it[(__bridge id)kSecAttrAccount] ?: @"";
+            NSString *hay = [[NSString stringWithFormat:@"%@ %@", svc, acc] lowercaseString];
+            BOOL hit = NO;
+            for (NSString *t in toks) if ([hay containsString:t]) { hit = YES; break; }
+            if (!hit) continue;
+            NSMutableDictionary *del = [NSMutableDictionary dictionary];
+            del[(__bridge id)kSecClass] = cls;
+            if (svc.length) del[(__bridge id)kSecAttrService] = svc;
+            if (acc.length) del[(__bridge id)kSecAttrAccount] = acc;
+            if (SecItemDelete((__bridge CFDictionaryRef)del) == errSecSuccess) n++;
+        }
+    }
+    return n;
+}
+
+static int VXResetGuest(void) {
+    int n = VXKeychainPurge();
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *home = NSHomeDirectory();
+    NSArray *toks = @[@"guest", @"garena", @"freefire", @"dts", @"shield",
+                      @"account", @"session", @"token", @"uid", @"login"];
+
+    NSString *pref = [home stringByAppendingPathComponent:@"Library/Preferences"];
+    for (NSString *it in [fm contentsOfDirectoryAtPath:pref error:nil]) {
+        NSString *low = it.lowercaseString;
+        if (!([low containsString:@"freefire"] || [low containsString:@"garena"] ||
+              [low containsString:@"dts"] || [low containsString:@"shield"])) continue;
+        if ([fm removeItemAtPath:[pref stringByAppendingPathComponent:it] error:nil]) n++;
+    }
+
+    for (NSString *d in @[@"Documents", @"Library/Application Support"]) {
+        NSString *full = [home stringByAppendingPathComponent:d];
+        for (NSString *it in [fm contentsOfDirectoryAtPath:full error:nil]) {
+            NSString *low = it.lowercaseString;
+            BOOL hit = NO;
+            for (NSString *t in toks) if ([low containsString:t]) { hit = YES; break; }
+            if (!hit) continue;
+            if ([fm removeItemAtPath:[full stringByAppendingPathComponent:it] error:nil]) n++;
+        }
+    }
+
+    [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:[[NSBundle mainBundle] bundleIdentifier]];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+    return n;
+}
+
+static void VXConfirmReset(void) {
+    UIAlertController *a = [UIAlertController
+        alertControllerWithTitle:@"RESET INVITADO"
+                         message:@"Borra keychain, plists y sesion.\nNo toca FB ni Google."
+                  preferredStyle:UIAlertControllerStyleAlert];
+    [a addAction:[UIAlertAction actionWithTitle:@"cancelar" style:UIAlertActionStyleCancel handler:nil]];
+    [a addAction:[UIAlertAction actionWithTitle:@"borrar" style:UIAlertActionStyleDestructive
+                                       handler:^(UIAlertAction *x) {
+        NSInteger n = VXResetGuest();
+        VXText([NSString stringWithFormat:@"reset: %ld elementos\ncerrando", (long)n]);
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)),
+                       dispatch_get_main_queue(), ^{ exit(0); });
+    }]];
+    UIViewController *top = [UIApplication sharedApplication].keyWindow.rootViewController;
+    [top presentViewController:a animated:YES completion:nil];
+}
+
+#pragma mark - botones
+
+static UIButton *VXBtn(NSString *t, UIColor *c, CGPoint p, void (^blk)(void)) {
+    UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
+    b.frame = CGRectMake(p.x, p.y, 54, 54);
+    b.backgroundColor = [UIColor colorWithWhite:0 alpha:0.6];
+    b.layer.cornerRadius = 27;
+    b.layer.borderWidth = 1;
+    b.layer.borderColor = c.CGColor;
+    [b setTitle:t forState:UIControlStateNormal];
+    [b setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+    [b addAction:[UIAction actionWithHandler:^(UIAction *a) { blk(); }]
+      forControlEvents:UIControlEventTouchUpInside];
+    return b;
+}
+
+static void VXButtons(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        UIWindow *w = [[UIWindow alloc] initWithFrame:CGRectMake(0, 140, 54, 54)];
+        UIWindow *w = [[UIWindow alloc] initWithFrame:CGRectMake(0, 130, 54, 120)];
         w.windowLevel = UIWindowLevelAlert + 2;
         w.backgroundColor = [UIColor clearColor];
         UIViewController *vc = [[UIViewController alloc] init];
         vc.view.backgroundColor = [UIColor clearColor];
         w.rootViewController = vc;
         [w makeKeyAndVisible];
-        UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
-        b.frame = CGRectMake(0, 0, 54, 54);
-        b.backgroundColor = [UIColor colorWithWhite:0 alpha:0.6];
-        b.layer.cornerRadius = 27;
-        b.layer.borderWidth = 1;
-        b.layer.borderColor = [UIColor greenColor].CGColor;
-        [b setTitle:@"D" forState:UIControlStateNormal];
-        [b addAction:[UIAction actionWithHandler:^(UIAction *a) {
+
+        [vc.view addSubview:VXBtn(@"D", [UIColor greenColor], CGPointMake(0, 0), ^{
             dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ VXDump(); });
-        }] forControlEvents:UIControlEventTouchUpInside];
-        [vc.view addSubview:b];
+        })];
+        [vc.view addSubview:VXBtn(@"R", [UIColor orangeColor], CGPointMake(0, 62), ^{
+            VXConfirmReset();
+        })];
     });
 }
 
 __attribute__((constructor)) static void VXInit(void) {
     VXHideSelf();
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(12 * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(), ^{ VXButton(); });
+                   dispatch_get_main_queue(), ^{ VXButtons(); });
 }
