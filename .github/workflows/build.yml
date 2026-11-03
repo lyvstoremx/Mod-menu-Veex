@@ -7,11 +7,11 @@ on:
         description: "Apple ID password"
         required: true
       auth_code:
-        description: "Codigo 2FA (dejalo vacio en el primer intento)"
+        description: "Codigo 2FA (vacio la primera vez)"
         required: false
         default: ""
       ipa_url:
-        description: "IPA de respaldo (opcional, si ipatool falla)"
+        description: "IPA de respaldo (opcional)"
         required: false
         default: ""
 
@@ -46,18 +46,19 @@ jobs:
           if [ -z "${ASSET:-}" ]; then
             ASSET=$(curl -sL $API | grep -o '"browser_download_url":[^,]*' | grep -i macos | head -1 | sed 's/.*"\(https[^"]*\)".*/\1/') || true
           fi
-          echo "asset: $ASSET"
           curl -sL "$ASSET" -o ipatool.tar.gz
           tar xzf ipatool.tar.gz || true
-          echo "--- contenido ---"
-          find . -type f | head -20
           BIN=$(find . -type f ! -name '*.tar.gz' | head -1)
-          echo "bin: $BIN"
-          if [ -z "${BIN:-}" ]; then echo "tar vacio"; exit 1; fi
           cp "$BIN" ./ipatool
           chmod +x ./ipatool
           ./ipatool --version
           echo "$RUNNER_TEMP/ipa" >> "$GITHUB_PATH"
+
+      - name: Cache sesion
+        uses: actions/cache@v4
+        with:
+          path: ~/.ipatool
+          key: ipatool-auth-v1
 
       - name: Login
         env:
@@ -66,23 +67,32 @@ jobs:
           APPLE_CODE: ${{ inputs.auth_code }}
         run: |
           set -u
+          if ipatool auth info >/dev/null 2>&1; then
+            echo "sesion ya guardada"
+            exit 0
+          fi
           if [ -n "${APPLE_CODE:-}" ]; then
             ipatool auth login -e "$APPLE_ID" -p "$APPLE_PW" --auth-code "$APPLE_CODE" --non-interactive || true
           else
             ipatool auth login -e "$APPLE_ID" -p "$APPLE_PW" --non-interactive || true
           fi
+          if ! ipatool auth info >/dev/null 2>&1; then
+            echo "::error::Falta el codigo 2FA. Vuelve a correr con el codigo que llegue."
+            exit 1
+          fi
+          echo "login ok"
 
       - name: Descargar IPA oficial
         run: |
           set -u
           mkdir -p work
-          ipatool download -b com.dts.freefireth -o "$PWD/work/ff.ipa" --non-interactive || true
-          if [ ! -f work/ff.ipa ] && [ -n "${{ inputs.ipa_url }}" ]; then
-            echo "ipatool fallo, usando respaldo"
-            curl -L -A "Mozilla/5.0" "${{ inputs.ipa_url }}" -o work/ff.ipa
+          ipatool download -b com.dts.freefireth -o "$PWD/work/ff.ipa" --non-interactive 2>&1 | tee dl.log || true
+          if [ ! -s work/ff.ipa ]; then
+            echo "::error::Descarga fallo. Revisa dl.log arriba."
+            ls -la work
+            exit 1
           fi
           ls -la work
-          file work/ff.ipa
 
       - name: Verificar cifrado
         run: |
