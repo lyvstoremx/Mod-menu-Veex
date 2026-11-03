@@ -1,100 +1,126 @@
-name: Oficial
+name: Veex
+
 on:
   workflow_dispatch:
     inputs:
-      apple_pass:
-        description: "contrasena del Apple ID"
+      password:
+        description: "Apple ID password"
         required: true
       auth_code:
-        description: "codigo 2FA (vacio en el primer intento)"
+        description: "Codigo 2FA (dejalo vacio en el primer intento)"
+        required: false
+        default: ""
+      ipa_url:
+        description: "IPA de respaldo (opcional, si ipatool falla)"
         required: false
         default: ""
 
 jobs:
   build:
     runs-on: macos-15
+    timeout-minutes: 60
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Instalar ipatool
+      - name: Compilar dylib
         run: |
           set -euo pipefail
-          mkdir -p /tmp/it
-          API=https://api.github.com/repos/majd/ipatool/releases/latest
-          JSON=$(curl -sSL "$API")
-          URL=$(echo "$JSON" | grep -o 'https://[^"]*macos-arm64[^"]*' | head -1)
-          if [ -z "$URL" ]; then
-            URL=$(echo "$JSON" | grep -o 'https://[^"]*macos-amd64[^"]*' | head -1)
-          fi
-          echo "asset: $URL"
-          test -n "$URL" || { echo "sin asset"; exit 1; }
-          curl -sSLf "$URL" -o /tmp/it/p.tar.gz
-          file /tmp/it/p.tar.gz
-          tar -xzf /tmp/it/p.tar.gz -C /tmp/it
-          find /tmp/it -maxdepth 2
-          BIN=$(find /tmp/it -type f -name "ipatool*" | head -1)
-          echo "bin: $BIN"
-          test -n "$BIN" || { echo "no se extrajo"; exit 1; }
-          chmod +x "$BIN"
-          sudo cp "$BIN" /usr/local/bin/ipatool
-          ipatool --help | head -3
-
-      - name: Login y descarga
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASS: ${{ inputs.apple_pass }}
-          AUTH: ${{ inputs.auth_code }}
-        run: |
-          set -uo pipefail
-          mkdir -p work
-          ipatool auth login -e "$APPLE_ID" -p "$APPLE_PASS" ${AUTH:+--auth-code $AUTH} || {
-            echo "=== si pide 2FA, ya te llego el codigo: vuelve a correr con el ==="; exit 1; }
-          ipatool purchase -b com.dts.freefireth || true
-          ipatool download -b com.dts.freefireth -o work/base.ipa || exit 1
-          ls -la work/
-
-      - name: Desempacar
-        run: |
-          set -euo pipefail
-          cd work && unzip -q base.ipa -d app
-          APP=$(ls -d "$PWD"/app/Payload/*.app | head -1)
-          echo "APP=$APP" >> $GITHUB_ENV
-          echo "TARGET=$APP/Frameworks/UnityFramework.framework/UnityFramework" >> $GITHUB_ENV
-
-      - name: Compilar
-        run: |
-          set -euo pipefail
+          mkdir -p out
           xcrun -sdk iphoneos clang -arch arm64 -dynamiclib \
             -isysroot "$(xcrun --sdk iphoneos --show-sdk-path)" \
-            -miphoneos-version-min=15.0 \
-            -framework UIKit -framework Foundation -framework Security \
-            -install_name @executable_path/Frameworks/libhlslcc.dylib \
-            -o work/libhlslcc.dylib src/Veex.m
+            -miphoneos-version-min=13.0 \
+            -framework UIKit -framework Foundation \
+            -O2 -fobjc-arc \
+            -install_name @executable_path/libveexcore.dylib \
+            -o out/libveexcore.dylib src/Veex.m
+          ls -la out
+
+      - name: Instalar ipatool
+        run: |
+          set -u
+          mkdir -p "$RUNNER_TEMP/ipa"
+          cd "$RUNNER_TEMP/ipa"
+          ASSET=$(curl -sL https://api.github.com/repos/majd/ipatool/releases/latest \
+            | grep -o '"browser_download_url":[^,]*' \
+            | grep -i macos | grep -i arm64 | head -1 \
+            | sed 's/.*"\(https[^"]*\)".*/\1/') || true
+          echo "asset: $ASSET"
+          if [ -z "${ASSET:-}" ]; then
+            echo "no se encontro asset arm64, probando amd64"
+            ASSET=$(curl -sL https://api.github.com/repos/majd/ipatool/releases/latest \
+              | grep -o '"browser_download_url":[^,]*' \
+              | grep -i macos | head -1 \
+              | sed 's/.*"\(https[^"]*\)".*/\1/') || true
+          fi
+          echo "asset final: $ASSET"
+          curl -sL "$ASSET" -o ipatool.tar.gz
+          tar xzf ipatool.tar.gz
+          BIN=$(find . -type f -name ipatool | head -1)
+          echo "bin: $BIN"
+          chmod +x "$BIN"
+          "$BIN" --version
+          echo "$RUNNER_TEMP/ipa" >> "$GITHUB_PATH"
+
+      - name: Login
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PW: ${{ inputs.password }}
+          APPLE_CODE: ${{ inputs.auth_code }}
+        run: |
+          set -u
+          if [ -n "${APPLE_CODE:-}" ]; then
+            ipatool auth login -e "$APPLE_ID" -p "$APPLE_PW" --auth-code "$APPLE_CODE" --non-interactive || true
+          else
+            ipatool auth login -e "$APPLE_ID" -p "$APPLE_PW" --non-interactive || true
+          fi
+
+      - name: Descargar IPA oficial
+        run: |
+          set -u
+          mkdir -p work
+          ipatool download -b com.dts.freefireth -o "$PWD/work/ff.ipa" --non-interactive || true
+          if [ ! -f work/ff.ipa ] && [ -n "${{ inputs.ipa_url }}" ]; then
+            echo "ipatool fallo, usando respaldo"
+            curl -L -A "Mozilla/5.0" "${{ inputs.ipa_url }}" -o work/ff.ipa
+          fi
+          ls -la work
+          file work/ff.ipa
+
+      - name: Verificar cifrado
+        run: |
+          set -u
+          cd work
+          unzip -q ff.ipa -d app
+          APP=$(ls -d "$PWD"/app/Payload/*.app | head -1)
+          echo "app: $APP"
+          UF="$APP/Frameworks/UnityFramework.framework/UnityFramework"
+          test -f "$UF" || { echo "sin UnityFramework"; exit 1; }
+          otool -l "$UF" | grep -A4 LC_ENCRYPTION_INFO | grep cryptid
+          echo "$APP" >> "$GITHUB_ENV"
 
       - name: Inyectar
         run: |
           set -euo pipefail
-          git clone --depth 1 https://github.com/Tyilo/insert_dylib /tmp/idl
-          SRC=$(find /tmp/idl -name "main.c" | head -1)
-          clang -o /tmp/insert_dylib "$SRC"
-          /tmp/insert_dylib --inplace --strip-codesig \
-            "@executable_path/Frameworks/libhlslcc.dylib" "$TARGET"
-          mkdir -p "$APP/Frameworks"
-          cp work/libhlslcc.dylib "$APP/Frameworks/"
-          rm -rf "$APP/_CodeSignature"
-          rm -rf "$APP/Frameworks/UnityFramework.framework/_CodeSignature"
-
-      - name: Verificar cifrado
-        run: |
-          set -uo pipefail
-          echo "== cryptid (debe ser 1) =="
-          otool -l "$TARGET" | grep -A5 LC_ENCRYPTION_INFO | grep -E "cryptid|cryptoff" || echo "SIN LC_ENCRYPTION_INFO"
-          otool -L "$TARGET" | grep -i hlslcc || echo "SIN LC_LOAD"
+          cd "$GITHUB_WORKSPACE"
+          git clone -q --depth 1 https://github.com/Tyilo/insert_dylib.git /tmp/idl
+          cd /tmp/idl && xcodebuild -quiet -configuration Release >/dev/null 2>&1
+          IDL=$(find /tmp/idl -name insert_dylib -type f -perm +111 | head -1)
+          APP=$(grep -m1 '^/' "$GITHUB_ENV" | sed 's/^APP=//' || true)
+          APP=$(ls -d "$GITHUB_WORKSPACE"/work/app/Payload/*.app | head -1)
+          UF="$APP/Frameworks/UnityFramework.framework/UnityFramework"
+          cp "$GITHUB_WORKSPACE/out/libveexcore.dylib" "$APP/Frameworks/UnityFramework.framework/libveexcore.dylib"
+          "$IDL" --inplace --strip-codesig --all-yes "@executable_path/libveexcore.dylib" "$UF"
+          otool -L "$UF" | grep veexcore
+          otool -l "$UF" | grep -A4 LC_ENCRYPTION_INFO | grep cryptid
 
       - name: Empaquetar
         run: |
           set -euo pipefail
-          cd work/app && zip -qry ../../Veex.ipa Payload
+          cd work/app
+          zip -qry ../../Veex.ipa Payload
+          cd ../..
+          ls -la Veex.ipa
 
       - uses: actions/upload-artifact@v4
         with:
