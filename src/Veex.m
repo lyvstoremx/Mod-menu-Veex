@@ -26,7 +26,9 @@ static void VXText(NSString *t) {
         w.rootViewController = vc;
         [w makeKeyAndVisible];
 
-        UITextView *tv = [[UITextView alloc] initWithFrame:CGRectInset(vc.view.bounds, 6, 56)];
+        CGRect b = vc.view.bounds;
+        UITextView *tv = [[UITextView alloc] initWithFrame:
+                          CGRectMake(6, 56, b.size.width - 12, b.size.height - 112)];
         tv.backgroundColor = [UIColor colorWithWhite:0.05 alpha:1];
         tv.textColor = [UIColor colorWithRed:0.5 green:1 blue:0.6 alpha:1];
         tv.font = [UIFont fontWithName:@"Menlo" size:9] ?: [UIFont systemFontOfSize:9];
@@ -34,12 +36,12 @@ static void VXText(NSString *t) {
         tv.editable = NO;
         [vc.view addSubview:tv];
 
-        UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
-        b.frame = CGRectMake(6, vc.view.bounds.size.height - 50, vc.view.bounds.size.width - 12, 42);
-        [b setTitle:@"cerrar" forState:UIControlStateNormal];
-        [b addAction:[UIAction actionWithHandler:^(UIAction *a) { w.hidden = YES; }]
+        UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
+        btn.frame = CGRectMake(6, b.size.height - 50, b.size.width - 12, 42);
+        [btn setTitle:@"cerrar" forState:UIControlStateNormal];
+        [btn addAction:[UIAction actionWithHandler:^(UIAction *a) { w.hidden = YES; }]
           forControlEvents:UIControlEventTouchUpInside];
-        [vc.view addSubview:b];
+        [vc.view addSubview:btn];
     });
 }
 
