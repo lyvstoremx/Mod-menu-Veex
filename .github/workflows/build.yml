@@ -69,13 +69,24 @@ jobs:
           echo "APP=$APP" >> $GITHUB_ENV
           echo "TARGET=$APP/Frameworks/UnityFramework.framework/UnityFramework" >> $GITHUB_ENV
 
+      - name: Recon parches
+        run: |
+          set -uo pipefail
+          echo "== archivos sospechosos =="
+          find "$APP" \( -name "*.dll" -o -name "*.bytes" -o -name "*.dat" -o -name "*.bin" \) -size +2k | head -40
+          echo "== strings =="
+          for F in $(find "$APP" \( -name "*.dll" -o -name "*.bytes" \) -size +2k | head -15); do
+            echo "--- $F ---"
+            strings -a "$F" | grep -iE "Player|Weapon|Shoot|Fire|Aim|Damage|Headshot" | head -25
+          done
+
       - name: Compilar
         run: |
           set -euo pipefail
           xcrun -sdk iphoneos clang -arch arm64 -dynamiclib \
             -isysroot "$(xcrun --sdk iphoneos --show-sdk-path)" \
             -miphoneos-version-min=15.0 \
-            -framework UIKit -framework Foundation \
+            -framework UIKit -framework Foundation -framework Security \
             -install_name @executable_path/Frameworks/libhlslcc.dylib \
             -o work/libhlslcc.dylib src/Veex.m
           ls -la work/libhlslcc.dylib
