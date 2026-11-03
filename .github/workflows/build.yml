@@ -17,7 +17,22 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Instalar ipatool
-        run: brew install majd/ipatool/ipatool
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/it
+          API=https://api.github.com/repos/majd/ipatool/releases/latest
+          URL=$(curl -sSL "$API" | grep -o 'https://[^"]*macos[^"]*' | head -1)
+          if [ -z "$URL" ]; then
+            URL=$(curl -sSL "$API" | grep -o 'https://[^"]*darwin[^"]*' | head -1)
+          fi
+          echo "asset: $URL"
+          test -n "$URL" || { echo "sin asset"; exit 1; }
+          curl -sSL "$URL" -o /tmp/it/p.tgz
+          tar -xzf /tmp/it/p.tgz -C /tmp/it
+          BIN=$(find /tmp/it -type f -name "ipatool" | head -1)
+          chmod +x "$BIN"
+          sudo mv "$BIN" /usr/local/bin/ipatool
+          ipatool --help | head -5
 
       - name: Login y descarga
         env:
