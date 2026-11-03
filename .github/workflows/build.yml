@@ -6,10 +6,6 @@ on:
       password:
         description: "Apple ID password"
         required: true
-      auth_code:
-        description: "Codigo 2FA (vacio la primera vez)"
-        required: false
-        default: ""
       ipa_url:
         description: "IPA de respaldo (opcional)"
         required: false
@@ -43,13 +39,11 @@ jobs:
           cd "$RUNNER_TEMP/ipa"
           BASE=https://github.com/majd/ipatool/releases/download/v2.7.0
           if ! curl -fsSL "$BASE/ipatool-2.7.0-macos-arm64.tar.gz" -o ipatool.tar.gz; then
-            echo "arm64 fallo, probando amd64"
             curl -fsSL "$BASE/ipatool-2.7.0-macos-amd64.tar.gz" -o ipatool.tar.gz
           fi
           test -s ipatool.tar.gz || { echo "descarga vacia"; exit 1; }
           tar xzf ipatool.tar.gz
           BIN=$(find . -type f ! -name '*.tar.gz' | head -1)
-          echo "bin: $BIN"
           cp "$BIN" ./ipatool
           chmod +x ./ipatool
           ./ipatool --version
@@ -65,20 +59,45 @@ jobs:
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PW: ${{ inputs.password }}
-          APPLE_CODE: ${{ inputs.auth_code }}
         run: |
           set -u
           if ipatool auth info >/dev/null 2>&1; then
             echo "sesion ya guardada"
             exit 0
           fi
-          if [ -n "${APPLE_CODE:-}" ]; then
-            ipatool auth login -e "$APPLE_ID" -p "$APPLE_PW" --auth-code "$APPLE_CODE" --non-interactive || true
-          else
-            ipatool auth login -e "$APPLE_ID" -p "$APPLE_PW" --non-interactive || true
+          rm -f /tmp/fifo login.log
+          mkfifo /tmp/fifo
+          ipatool auth login -e "$APPLE_ID" -p "$APPLE_PW" < /tmp/fifo > login.log 2>&1 &
+          PID=$!
+          exec 3> /tmp/fifo
+          echo "esperando codigo en code.txt (10 min)"
+          CODE=""
+          for i in $(seq 1 60); do
+            sleep 10
+            C=$(curl -s "https://raw.githubusercontent.com/lyvstoremx/Mod-menu-Veex/main/code.txt?t=$i" | tr -d '[:space:]') || true
+            echo "poll $i -> '$C'"
+            if echo "$C" | grep -Eq '^[0-9]{6}$'; then
+              CODE=$C
+              break
+            fi
+            if ! kill -0 $PID 2>/dev/null; then
+              echo "ipatool termino antes de tiempo"
+              break
+            fi
+          done
+          cat login.log || true
+          if [ -z "$CODE" ]; then
+            echo "::error::No llego codigo a code.txt"
+            kill $PID 2>/dev/null || true
+            exit 1
           fi
+          echo "codigo: $CODE"
+          echo "$CODE" >&3
+          wait $PID || true
+          echo "--- salida ---"
+          cat login.log || true
           if ! ipatool auth info >/dev/null 2>&1; then
-            echo "::error::Falta el codigo 2FA. Vuelve a correr con el codigo que llegue."
+            echo "::error::Login fallo"
             exit 1
           fi
           echo "login ok"
