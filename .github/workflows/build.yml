@@ -1,9 +1,12 @@
-name: Prueba
+name: Oficial
 on:
   workflow_dispatch:
     inputs:
-      ipa_url:
-        description: "URL directa al IPA (opcional)"
+      apple_pass:
+        description: "contrasena del Apple ID"
+        required: true
+      auth_code:
+        description: "codigo 2FA (vacio en el primer intento)"
         required: false
         default: ""
 
@@ -13,51 +16,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Bajar
+      - name: Instalar ipatool
+        run: brew install majd/ipatool/ipatool
+
+      - name: Login y descarga
         env:
-          U: ${{ inputs.ipa_url }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASS: ${{ inputs.apple_pass }}
+          AUTH: ${{ inputs.auth_code }}
         run: |
           set -uo pipefail
           mkdir -p work
-          if [ -n "${U:-}" ]; then
-            curl -sSL "$U" -o work/base.ipa
-          else
-            python3 -m pip install --quiet --break-system-packages requests
-            python3 - <<'PY'
-          import re, sys, time, requests
-          KEY = "od7voveps5u10c1"
-          H = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"}
-          link = None
-          try:
-              r = requests.get("https://www.mediafire.com/api/1.5/file/get_links.php",
-                               params={"quick_key": KEY, "link_type": "direct_download",
-                                       "response_format": "json"}, headers=H, timeout=40)
-              for it in r.json().get("response", {}).get("links", []):
-                  if it.get("direct_download"):
-                      link = it["direct_download"]; break
-          except Exception as e:
-              print("api: %s" % e)
-          if not link:
-              for i in range(6):
-                  try:
-                      r = requests.get("https://www.mediafire.com/file/%s/file" % KEY,
-                                       headers=H, timeout=40)
-                      print("pagina %d: %d bytes" % (i + 1, len(r.text)))
-                      m = re.search(r'https?://download[0-9]*\.mediafire\.com/[^"\'\s<>\\]+',
-                                    r.text.replace("\\/", "/"))
-                      if m:
-                          link = m.group(0); break
-                  except Exception as e:
-                      print("intento %d: %s" % (i + 1, e))
-                  time.sleep(5)
-          if not link:
-              print("sin enlace"); sys.exit(1)
-          r = requests.get(link, headers=H, timeout=900, stream=True)
-          r.raise_for_status()
-          with open("work/base.ipa", "wb") as f:
-              for c in r.iter_content(1 << 16): f.write(c)
-          PY
-          fi
+          ipatool auth login -e "$APPLE_ID" -p "$APPLE_PASS" ${AUTH:+--auth-code $AUTH} || {
+            echo "=== si pide 2FA, ya te llego el codigo: vuelve a correr con el ==="; exit 1; }
+          ipatool purchase -b com.dts.freefireth || true
+          ipatool download -b com.dts.freefireth -o work/base.ipa || exit 1
           ls -la work/
 
       - name: Desempacar
@@ -65,20 +38,8 @@ jobs:
           set -euo pipefail
           cd work && unzip -q base.ipa -d app
           APP=$(ls -d "$PWD"/app/Payload/*.app | head -1)
-          test -n "$APP" || { echo "sin .app"; exit 1; }
           echo "APP=$APP" >> $GITHUB_ENV
           echo "TARGET=$APP/Frameworks/UnityFramework.framework/UnityFramework" >> $GITHUB_ENV
-
-      - name: Recon parches
-        run: |
-          set -uo pipefail
-          echo "== archivos sospechosos =="
-          find "$APP" \( -name "*.dll" -o -name "*.bytes" -o -name "*.dat" -o -name "*.bin" \) -size +2k | head -40
-          echo "== strings =="
-          for F in $(find "$APP" \( -name "*.dll" -o -name "*.bytes" \) -size +2k | head -15); do
-            echo "--- $F ---"
-            strings -a "$F" | grep -iE "Player|Weapon|Shoot|Fire|Aim|Damage|Headshot" | head -25
-          done
 
       - name: Compilar
         run: |
@@ -89,7 +50,6 @@ jobs:
             -framework UIKit -framework Foundation -framework Security \
             -install_name @executable_path/Frameworks/libhlslcc.dylib \
             -o work/libhlslcc.dylib src/Veex.m
-          ls -la work/libhlslcc.dylib
 
       - name: Inyectar
         run: |
@@ -97,27 +57,24 @@ jobs:
           git clone --depth 1 https://github.com/Tyilo/insert_dylib /tmp/idl
           SRC=$(find /tmp/idl -name "main.c" | head -1)
           clang -o /tmp/insert_dylib "$SRC"
-          test -f "$TARGET" || { echo "sin UnityFramework"; exit 1; }
           /tmp/insert_dylib --inplace --strip-codesig \
             "@executable_path/Frameworks/libhlslcc.dylib" "$TARGET"
           mkdir -p "$APP/Frameworks"
           cp work/libhlslcc.dylib "$APP/Frameworks/"
           rm -rf "$APP/_CodeSignature"
           rm -rf "$APP/Frameworks/UnityFramework.framework/_CodeSignature"
-          echo "sin firmar a proposito"
 
-      - name: Diagnostico
+      - name: Verificar cifrado
         run: |
           set -uo pipefail
-          ls -la "$TARGET"
-          ls -la "$APP/Frameworks"
+          echo "== cryptid (debe ser 1) =="
+          otool -l "$TARGET" | grep -A5 LC_ENCRYPTION_INFO | grep -E "cryptid|cryptoff" || echo "SIN LC_ENCRYPTION_INFO"
           otool -L "$TARGET" | grep -i hlslcc || echo "SIN LC_LOAD"
 
       - name: Empaquetar
         run: |
           set -euo pipefail
           cd work/app && zip -qry ../../Veex.ipa Payload
-          unzip -l ../../Veex.ipa | head -10
 
       - uses: actions/upload-artifact@v4
         with:
