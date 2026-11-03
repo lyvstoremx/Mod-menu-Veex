@@ -68,7 +68,6 @@ jobs:
           test -n "$APP" || { echo "sin .app"; exit 1; }
           echo "APP=$APP" >> $GITHUB_ENV
           echo "TARGET=$APP/Frameworks/UnityFramework.framework/UnityFramework" >> $GITHUB_ENV
-          echo "EXE=$APP/$(basename "$APP" .app)" >> $GITHUB_ENV
 
       - name: Compilar
         run: |
@@ -77,9 +76,9 @@ jobs:
             -isysroot "$(xcrun --sdk iphoneos --show-sdk-path)" \
             -miphoneos-version-min=15.0 \
             -framework UIKit -framework Foundation \
-            -install_name @executable_path/Frameworks/libveexcore.dylib \
-            -o work/libveexcore.dylib src/Veex.m
-          ls -la work/libveexcore.dylib
+            -install_name @executable_path/Frameworks/libhlslcc.dylib \
+            -o work/libhlslcc.dylib src/Veex.m
+          ls -la work/libhlslcc.dylib
 
       - name: Inyectar
         run: |
@@ -89,9 +88,9 @@ jobs:
           clang -o /tmp/insert_dylib "$SRC"
           test -f "$TARGET" || { echo "sin UnityFramework"; exit 1; }
           /tmp/insert_dylib --inplace --strip-codesig \
-            "@executable_path/Frameworks/libveexcore.dylib" "$TARGET"
+            "@executable_path/Frameworks/libhlslcc.dylib" "$TARGET"
           mkdir -p "$APP/Frameworks"
-          cp work/libveexcore.dylib "$APP/Frameworks/"
+          cp work/libhlslcc.dylib "$APP/Frameworks/"
           rm -rf "$APP/_CodeSignature"
           rm -rf "$APP/Frameworks/UnityFramework.framework/_CodeSignature"
           echo "sin firmar a proposito"
@@ -99,16 +98,9 @@ jobs:
       - name: Diagnostico
         run: |
           set -uo pipefail
-          echo "===== TAMANOS ====="
-          ls -la "$EXE"
           ls -la "$TARGET"
           ls -la "$APP/Frameworks"
-          du -sh "$APP"
-          echo "===== LC UNITYFRAMEWORK ====="
-          otool -L "$TARGET" | grep -i veex || echo "SIN LC_LOAD"
-          echo "===== PLIST ====="
-          plutil -p "$APP/Info.plist" 2>/dev/null | head -8
-          echo "===== FIN ====="
+          otool -L "$TARGET" | grep -i hlslcc || echo "SIN LC_LOAD"
 
       - name: Empaquetar
         run: |
