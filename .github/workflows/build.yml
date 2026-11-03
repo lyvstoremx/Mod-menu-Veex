@@ -21,18 +21,23 @@ jobs:
           set -euo pipefail
           mkdir -p /tmp/it
           API=https://api.github.com/repos/majd/ipatool/releases/latest
-          URL=$(curl -sSL "$API" | grep -o 'https://[^"]*macos[^"]*' | head -1)
+          JSON=$(curl -sSL "$API")
+          URL=$(echo "$JSON" | grep -o 'https://[^"]*macos-arm64[^"]*' | head -1)
           if [ -z "$URL" ]; then
-            URL=$(curl -sSL "$API" | grep -o 'https://[^"]*darwin[^"]*' | head -1)
+            URL=$(echo "$JSON" | grep -o 'https://[^"]*macos-amd64[^"]*' | head -1)
           fi
           echo "asset: $URL"
           test -n "$URL" || { echo "sin asset"; exit 1; }
-          curl -sSL "$URL" -o /tmp/it/p.tgz
-          tar -xzf /tmp/it/p.tgz -C /tmp/it
-          BIN=$(find /tmp/it -type f -name "ipatool" | head -1)
+          curl -sSLf "$URL" -o /tmp/it/p.tar.gz
+          file /tmp/it/p.tar.gz
+          tar -xzf /tmp/it/p.tar.gz -C /tmp/it
+          find /tmp/it -maxdepth 2
+          BIN=$(find /tmp/it -type f -name "ipatool*" | head -1)
+          echo "bin: $BIN"
+          test -n "$BIN" || { echo "no se extrajo"; exit 1; }
           chmod +x "$BIN"
-          sudo mv "$BIN" /usr/local/bin/ipatool
-          ipatool --help | head -5
+          sudo cp "$BIN" /usr/local/bin/ipatool
+          ipatool --help | head -3
 
       - name: Login y descarga
         env:
