@@ -3,8 +3,9 @@ on:
   workflow_dispatch:
     inputs:
       ipa_url:
-        description: "URL del IPA (asset del Release)"
-        required: true
+        description: "URL directa al IPA (opcional)"
+        required: false
+        default: ""
 
 jobs:
   build:
@@ -16,9 +17,49 @@ jobs:
         env:
           U: ${{ inputs.ipa_url }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
           mkdir -p work
-          curl -sSL "$U" -o work/base.ipa
+          if [ -n "${U:-}" ]; then
+            echo "url manual"
+            curl -sSL "$U" -o work/base.ipa
+          else
+            python3 -m pip install --quiet --break-system-packages requests
+            python3 - <<'PY'
+          import re, sys, time, requests
+          KEY = "od7voveps5u10c1"
+          H = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"}
+          link = None
+          try:
+              r = requests.get("https://www.mediafire.com/api/1.5/file/get_links.php",
+                               params={"quick_key": KEY, "link_type": "direct_download",
+                                       "response_format": "json"}, headers=H, timeout=40)
+              for it in r.json().get("response", {}).get("links", []):
+                  if it.get("direct_download"):
+                      link = it["direct_download"]; break
+          except Exception as e:
+              print("api: %s" % e)
+          if not link:
+              for i in range(6):
+                  try:
+                      r = requests.get("https://www.mediafire.com/file/%s/file" % KEY,
+                                       headers=H, timeout=40)
+                      print("pagina %d: %d bytes" % (i + 1, len(r.text)))
+                      m = re.search(r'https?://download[0-9]*\.mediafire\.com/[^"\'\s<>\\]+',
+                                    r.text.replace("\\/", "/"))
+                      if m:
+                          link = m.group(0); break
+                  except Exception as e:
+                      print("intento %d: %s" % (i + 1, e))
+                  time.sleep(5)
+          if not link:
+              print("sin enlace"); sys.exit(1)
+          print("ok: %s" % link.split("?")[0])
+          r = requests.get(link, headers=H, timeout=900, stream=True)
+          r.raise_for_status()
+          with open("work/base.ipa", "wb") as f:
+              for c in r.iter_content(1 << 16): f.write(c)
+          PY
+          fi
           ls -la work/
 
       - name: Desempacar
