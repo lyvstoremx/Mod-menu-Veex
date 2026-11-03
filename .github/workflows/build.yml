@@ -7,6 +7,9 @@ on:
         description: "Apple ID password"
         required: true
 
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: macos-15
@@ -58,9 +61,9 @@ jobs:
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PW: ${{ inputs.password }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -u
-          echo "cuenta: [$APPLE_ID]"
           if ipatool auth info >/dev/null 2>&1; then
             echo "sesion ya guardada"
             exit 0
@@ -73,7 +76,8 @@ jobs:
           CODE=""
           for i in $(seq 1 55); do
             sleep 10
-            C=$(curl -s "https://raw.githubusercontent.com/lyvstoremx/Mod-menu-Veex/main/code.txt?t=$i" | tr -d '[:space:]') || true
+            API="https://api.github.com/repos/lyvstoremx/Mod-menu-Veex/contents/code.txt?ref=main&t=$i"
+            C=$(curl -s -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" "$API" | jq -r '.content // empty' | base64 -d 2>/dev/null | tr -d '[:space:]') || true
             echo "poll $i -> '$C'"
             if echo "$C" | grep -Eq '^[0-9]{6}$'; then
               CODE=$C
