@@ -17,23 +17,39 @@ typedef const char *(*fn_f_name)(void *);
 
 static void *S(const char *n) { return dlsym(RTLD_DEFAULT, n); }
 
-static void VXAlert(NSString *t, NSString *m) {
-    UIWindow *w = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
-    w.windowLevel = UIWindowLevelAlert + 2;
-    w.rootViewController = [[UIViewController alloc] init];
-    [w makeKeyAndVisible];
-    UIAlertController *a = [UIAlertController alertControllerWithTitle:t message:m
-                                                       preferredStyle:UIAlertControllerStyleAlert];
-    [a addAction:[UIAlertAction actionWithTitle:@"ok" style:UIAlertActionStyleDefault handler:nil]];
-    [w.rootViewController presentViewController:a animated:YES completion:nil];
+static void VXText(NSString *t) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIWindow *w = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
+        w.windowLevel = UIWindowLevelAlert + 2;
+        UIViewController *vc = [[UIViewController alloc] init];
+        vc.view.backgroundColor = [UIColor colorWithWhite:0.02 alpha:0.97];
+        w.rootViewController = vc;
+        [w makeKeyAndVisible];
+
+        UITextView *tv = [[UITextView alloc] initWithFrame:CGRectInset(vc.view.bounds, 6, 56)];
+        tv.backgroundColor = [UIColor colorWithWhite:0.05 alpha:1];
+        tv.textColor = [UIColor colorWithRed:0.5 green:1 blue:0.6 alpha:1];
+        tv.font = [UIFont fontWithName:@"Menlo" size:9] ?: [UIFont systemFontOfSize:9];
+        tv.text = t;
+        tv.editable = NO;
+        [vc.view addSubview:tv];
+
+        UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
+        b.frame = CGRectMake(6, vc.view.bounds.size.height - 50, vc.view.bounds.size.width - 12, 42);
+        [b setTitle:@"cerrar" forState:UIControlStateNormal];
+        [b addAction:[UIAction actionWithHandler:^(UIAction *a) { w.hidden = YES; }]
+          forControlEvents:UIControlEventTouchUpInside];
+        [vc.view addSubview:b];
+    });
 }
 
-static NSString *VXUpload(NSString *txt) {
-    NSMutableURLRequest *r = [NSMutableURLRequest requestWithURL:
-                              [NSURL URLWithString:@"https://paste.rs"]];
+static NSString *VXPost(NSString *url, NSString *txt) {
+    NSMutableURLRequest *r = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:url]];
     r.HTTPMethod = @"POST";
     r.HTTPBody = [txt dataUsingEncoding:NSUTF8StringEncoding];
-    r.timeoutInterval = 30;
+    [r setValue:@"text/plain; charset=utf-8" forHTTPHeaderField:@"Content-Type"];
+    [r setValue:@"Mozilla/5.0 (iPhone)" forHTTPHeaderField:@"User-Agent"];
+    r.timeoutInterval = 25;
     __block NSString *out = nil;
     dispatch_semaphore_t sem = dispatch_semaphore_create(0);
     [[[NSURLSession sharedSession] dataTaskWithRequest:r
@@ -41,8 +57,10 @@ static NSString *VXUpload(NSString *txt) {
             if (d) out = [[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding];
             dispatch_semaphore_signal(sem);
         }] resume];
-    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 35 * NSEC_PER_SEC));
-    return [out stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 30 * NSEC_PER_SEC));
+    out = [out stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (!out || [out hasPrefix:@"<"]) return nil;
+    return out;
 }
 
 static void VXDump(void) {
@@ -60,34 +78,30 @@ static void VXDump(void) {
     fn_f_name fn = (fn_f_name)S("il2cpp_field_get_name");
 
     if (!dg || !da || !ai || !in || !ic || !ig || !cn) {
-        VXAlert(@"VEEX", @"sin simbolos il2cpp");
+        VXText(@"sin simbolos il2cpp");
         return;
     }
 
     NSArray *keys = @[@"Player", @"Weapon", @"Camera", @"Trigger", @"Hit",
-                      @"Damage", @"Fire", @"Shoot", @"Aim", @"Target", @"Enemy", @"Bot"];
+                      @"Damage", @"Fire", @"Shoot", @"Aim", @"Target", @"Enemy"];
 
     NSMutableString *o = [NSMutableString string];
-    [o appendFormat:@"veex dump %@\n", [NSDate date]];
-
     void *d = dg();
     size_t n = 0;
     void **as = da(d, &n);
-    [o appendFormat:@"ensamblados: %zu\n", n];
-    if (!as) { VXAlert(@"VEEX", @"sin ensamblados"); return; }
+    [o appendFormat:@"ensamblados %zu\n", n];
+    if (!as) { VXText(@"sin ensamblados"); return; }
 
     int matched = 0;
-    for (size_t i = 0; i < n && matched < 300; i++) {
+    for (size_t i = 0; i < n && matched < 80; i++) {
         void *a = *(void **)((char *)as + 0x20 + i * 8);
         if (!a) continue;
         void *img = ai(a);
         if (!img) continue;
-        const char *inm = in(img);
-        [o appendFormat:@"\n### imagen %s\n", inm ? inm : "?"];
         size_t cc = ic(img);
-        for (size_t j = 0; j < cc && matched < 300; j++) {
+        for (size_t j = 0; j < cc && matched < 80; j++) {
             void *c = ig(img, j);
-            if (!c || !cn) continue;
+            if (!c) continue;
             const char *cname = cn(c);
             if (!cname) continue;
             NSString *full = [NSString stringWithUTF8String:cname];
@@ -96,37 +110,34 @@ static void VXDump(void) {
             if (!hit) continue;
             matched++;
             const char *ns = cs ? cs(c) : NULL;
-            [o appendFormat:@"\nclase %s::%s\n", ns ? ns : "", cname];
+            [o appendFormat:@"\n%s::%s\n", ns ? ns : "", cname];
             if (cm && mn) {
-                void *it = NULL;
-                void *m;
-                int lim = 0;
-                while ((m = cm(c, &it)) && lim++ < 40) {
-                    const char *mname = mn(m);
-                    if (mname) [o appendFormat:@"  m %s\n", mname];
+                void *it = NULL; void *m; int lim = 0;
+                while ((m = cm(c, &it)) && lim++ < 15) {
+                    const char *mn2 = mn(m);
+                    if (mn2) [o appendFormat:@"  m %s\n", mn2];
                 }
             }
             if (cf && fn) {
-                void *it = NULL;
-                void *f;
-                int lim = 0;
-                while ((f = cf(c, &it)) && lim++ < 40) {
-                    const char *fname = fn(f);
-                    if (fname) [o appendFormat:@"  f %s\n", fname];
+                void *it = NULL; void *f; int lim = 0;
+                while ((f = cf(c, &it)) && lim++ < 15) {
+                    const char *fn2 = fn(f);
+                    if (fn2) [o appendFormat:@"  f %s\n", fn2];
                 }
             }
         }
     }
+    [o appendFormat:@"\ntotal %d\n", matched];
 
-    [o appendFormat:@"\nclases encontradas: %d\n", matched];
     [o writeToFile:[NSHomeDirectory() stringByAppendingPathComponent:@"Documents/veex_dump.txt"]
         atomically:YES encoding:NSUTF8StringEncoding error:nil];
 
-    NSString *url = VXUpload(o);
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (url.length > 0) VXAlert(@"VEEX dump", url);
-        else VXAlert(@"VEEX", @"no subio, queda en Documents/veex_dump.txt");
-    });
+    NSString *url = VXPost(@"https://paste.rs", o);
+    if (url) {
+        VXText([NSString stringWithFormat:@"subido:\n%@\n\n%@", url, o]);
+    } else {
+        VXText([NSString stringWithFormat:@"no subio\n\n%@", o]);
+    }
 }
 
 __attribute__((constructor)) static void VXInit(void) {
