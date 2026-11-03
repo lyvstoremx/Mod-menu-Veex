@@ -1,0 +1,207 @@
+name: Veex Build
+on:
+  workflow_dispatch:
+    inputs:
+      ipa_url:
+        description: "URL directa al IPA"
+        required: true
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Descargar IPA base
+        env:
+          IPA_URL: ${{ inputs.ipa_url }}
+        run: |
+          set -uo pipefail
+          python3 -m pip install --quiet --break-system-packages requests
+          mkdir -p work
+          python3 - <<'PY'
+          import base64, os, random, re, sys, time, requests
+
+          OUT = "work/base.ipa"
+          PAGE = "https://www.mediafire.com/file/od7voveps5u10c1/file"
+          KEY = "od7voveps5u10c1"
+
+          UAS = [
+              "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+          ]
+
+          PATS = [
+              r'https?://download[0-9]*\.mediafire\.com/[^"\'\s<>\\]+',
+              r'//download[0-9]*\.mediafire\.com/[^"\'\s<>\\]+',
+          ]
+
+          def heads(ua):
+              return {"User-Agent": ua,
+                      "Accept": "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
+                      "Referer": "https://www.mediafire.com/"}
+
+          def extract(html):
+              h = html.replace("\\/", "/").replace("&amp;", "&")
+              for p in PATS:
+                  m = re.search(p, h)
+                  if m:
+                      u = m.group(0)
+                      return ("https:" + u) if u.startswith("//") else u
+              for m in re.finditer(r'data-scrambled-url="([^"]+)"', html):
+                  try:
+                      u = base64.b64decode(m.group(1) + "==").decode().strip()
+                      if "mediafire.com" in u:
+                          return u
+                  except Exception:
+                      pass
+              return None
+
+          def via_api():
+              try:
+                  r = requests.get("https://www.mediafire.com/api/1.5/file/get_links.php",
+                                   params={"quick_key": KEY, "link_type": "direct_download",
+                                           "response_format": "json"},
+                                   headers=heads(UAS[0]), timeout=40)
+                  print("api: %d bytes" % len(r.text))
+                  for it in r.json().get("response", {}).get("links", []):
+                      if it.get("direct_download"):
+                          return it["direct_download"]
+              except Exception as e:
+                  print("api error: %s" % e)
+              return None
+
+          def save(url):
+              r = requests.get(url, headers=heads(random.choice(UAS)), timeout=900,
+                               stream=True, allow_redirects=True)
+              r.raise_for_status()
+              n = 0
+              with open(OUT, "wb") as f:
+                  for c in r.iter_content(1 << 16):
+                      f.write(c)
+                      n += len(c)
+              print("descargados %d bytes" % n)
+              with open(OUT, "rb") as f:
+                  magic = f.read(2)
+              if magic != b"PK":
+                  print("no es zip/IPA (magic=%r)" % magic)
+                  return False
+              return n >= 200 * 1024 * 1024
+
+          override = os.environ.get("IPA_URL", "").strip()
+          if override:
+              print("usando URL manual")
+              sys.exit(0 if save(override) else 1)
+
+          link = via_api()
+          if not link:
+              for i in range(6):
+                  try:
+                      r = requests.get(PAGE, headers=heads(UAS[i % len(UAS)]), timeout=40)
+                      print("intento %d: %d bytes" % (i + 1, len(r.text)))
+                      link = extract(r.text)
+                      if link:
+                          break
+                  except Exception as e:
+                      print("intento %d error: %s" % (i + 1, e))
+                  time.sleep(5 + i * 2)
+
+          if not link:
+              print("sin enlace")
+              sys.exit(1)
+
+          print("enlace: %s" % link.split("?")[0])
+          sys.exit(0 if save(link) else 1)
+          PY
+          ls -la work/
+
+      - name: Desempaquetar
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/work"
+          unzip -q base.ipa -d app
+          APP=$(ls -d "$PWD"/app/Payload/*.app | head -1)
+          echo "APP=$APP" >> $GITHUB_ENV
+          ls "$APP" | head -30
+
+      - name: Compilar dylib
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          mkdir -p out
+          xcrun -sdk iphoneos clang -arch arm64 -dynamiclib \
+            -O2 -fobjc-arc -fvisibility=hidden \
+            -isysroot "$(xcrun --sdk iphoneos --show-sdk-path)" \
+            -miphoneos-version-min=13.0 \
+            -framework UIKit -framework Foundation -framework CoreGraphics \
+            -framework QuartzCore \
+            -install_name @executable_path/Frameworks/libveexcore.dylib \
+            -o out/libveexcore.dylib src/Veex.m
+          xcrun -sdk iphoneos strip -x out/libveexcore.dylib
+          ls -la out/
+
+      - name: Inyectar
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE"
+          python3 -m pip install --quiet --break-system-packages lief
+          python3 - <<'PY'
+          import lief, os, sys
+          app = os.environ["APP"]
+          exe = os.path.join(app, os.path.basename(app).replace(".app", ""))
+          print("app: %s" % app)
+          print("exe: %s" % exe)
+          if not os.path.isdir(app):
+              print("no existe el .app")
+              sys.exit(1)
+          if not os.path.isfile(exe):
+              print("no existe el binario")
+              sys.exit(1)
+          bin_ = lief.parse(exe)
+          if bin_ is None:
+              print("lief no pudo parsear")
+              sys.exit(1)
+          bin_.add_library("libveexcore.dylib")
+          bin_.write(exe)
+          print("LC_LOAD_DYLIB añadido")
+          PY
+          mkdir -p "$APP/Frameworks"
+          cp "$GITHUB_WORKSPACE/out/libveexcore.dylib" "$APP/Frameworks/"
+          chmod +x "$APP/Frameworks/libveexcore.dylib"
+
+      - name: Firmar
+        run: |
+          set -euo pipefail
+          rm -rf "$APP/_CodeSignature"
+          if [ -d "$APP/Frameworks" ]; then
+            find "$APP/Frameworks" -maxdepth 1 -type f -name "*.dylib" \
+              -exec codesign --force --sign - {} \;
+          fi
+          codesign --force --sign - --timestamp=none "$APP"
+
+      - name: Empaquetar
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/work/app"
+          zip -qry "$GITHUB_WORKSPACE/Veex.ipa" Payload
+          unzip -l "$GITHUB_WORKSPACE/Veex.ipa" | head -12
+          ls -la "$GITHUB_WORKSPACE/Veex.ipa"
+
+      - name: Subir artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: Veex
+          path: Veex.ipa
+          retention-days: 7
