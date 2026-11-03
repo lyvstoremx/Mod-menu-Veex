@@ -20,7 +20,6 @@ jobs:
           set -uo pipefail
           mkdir -p work
           if [ -n "${U:-}" ]; then
-            echo "url manual"
             curl -sSL "$U" -o work/base.ipa
           else
             python3 -m pip install --quiet --break-system-packages requests
@@ -53,7 +52,6 @@ jobs:
                   time.sleep(5)
           if not link:
               print("sin enlace"); sys.exit(1)
-          print("ok: %s" % link.split("?")[0])
           r = requests.get(link, headers=H, timeout=900, stream=True)
           r.raise_for_status()
           with open("work/base.ipa", "wb") as f:
@@ -68,11 +66,9 @@ jobs:
           cd work && unzip -q base.ipa -d app
           APP=$(ls -d "$PWD"/app/Payload/*.app | head -1)
           test -n "$APP" || { echo "sin .app"; exit 1; }
-          echo "app: $APP"
           echo "APP=$APP" >> $GITHUB_ENV
-          TARGET="$APP/Frameworks/UnityFramework.framework/UnityFramework"
-          echo "target: $TARGET"
-          echo "TARGET=$TARGET" >> $GITHUB_ENV
+          echo "TARGET=$APP/Frameworks/UnityFramework.framework/UnityFramework" >> $GITHUB_ENV
+          echo "EXE=$APP/$(basename "$APP" .app)" >> $GITHUB_ENV
 
       - name: Compilar
         run: |
@@ -83,32 +79,42 @@ jobs:
             -framework UIKit -framework Foundation \
             -install_name @executable_path/Frameworks/libveexcore.dylib \
             -o work/libveexcore.dylib src/Veex.m
+          ls -la work/libveexcore.dylib
 
-      - name: Inyectar y firmar
+      - name: Inyectar
         run: |
           set -euo pipefail
-          python3 -m pip install --quiet --break-system-packages lief
+          git clone --depth 1 https://github.com/Tyilo/insert_dylib /tmp/idl
+          SRC=$(find /tmp/idl -name "main.c" | head -1)
+          clang -o /tmp/insert_dylib "$SRC"
           test -f "$TARGET" || { echo "sin UnityFramework"; exit 1; }
-          python3 -c "
-          import lief, sys
-          b = lief.parse(sys.argv[1]); b.add_library('libveexcore.dylib'); b.write(sys.argv[1])
-          " "$TARGET"
+          /tmp/insert_dylib --inplace --strip-codesig \
+            "@executable_path/Frameworks/libveexcore.dylib" "$TARGET"
           mkdir -p "$APP/Frameworks"
           cp work/libveexcore.dylib "$APP/Frameworks/"
           rm -rf "$APP/_CodeSignature"
-          codesign --force --sign - "$APP/Frameworks/libveexcore.dylib"
-          codesign --force --sign - "$APP/Frameworks/UnityFramework.framework"
-          codesign --force --sign - "$APP"
+          rm -rf "$APP/Frameworks/UnityFramework.framework/_CodeSignature"
+          echo "sin firmar a proposito"
 
-      - name: Verificar
+      - name: Diagnostico
         run: |
           set -uo pipefail
+          echo "===== TAMANOS ====="
+          ls -la "$EXE"
+          ls -la "$TARGET"
+          ls -la "$APP/Frameworks"
+          du -sh "$APP"
+          echo "===== LC UNITYFRAMEWORK ====="
           otool -L "$TARGET" | grep -i veex || echo "SIN LC_LOAD"
+          echo "===== PLIST ====="
+          plutil -p "$APP/Info.plist" 2>/dev/null | head -8
+          echo "===== FIN ====="
 
       - name: Empaquetar
         run: |
           set -euo pipefail
           cd work/app && zip -qry ../../Veex.ipa Payload
+          unzip -l ../../Veex.ipa | head -10
 
       - uses: actions/upload-artifact@v4
         with:
