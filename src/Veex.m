@@ -1,6 +1,8 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <dlfcn.h>
+#import <mach-o/dyld.h>
+#import <string.h>
 
 typedef void  *(*fn_domain_get)(void);
 typedef void **(*fn_assemblies)(void *, size_t *);
@@ -12,6 +14,57 @@ typedef const char *(*fn_cls_name)(void *);
 typedef const char *(*fn_cls_ns)(void *);
 
 static void *S(const char *n) { return dlsym(RTLD_DEFAULT, n); }
+
+static uint32_t (*orig_count)(void);
+static const char *(*orig_name)(uint32_t);
+static int g_hideIdx = -1;
+
+static void VXOrig(void) {
+    if (orig_count && orig_name) return;
+    if (!orig_count) orig_count = (uint32_t (*)(void))dlsym(RTLD_NEXT, "_dyld_image_count");
+    if (!orig_name) orig_name = (const char *(*)(uint32_t))dlsym(RTLD_NEXT, "_dyld_get_image_name");
+}
+
+static const char *VXFallback(void) {
+    static char buf[1024];
+    uint32_t sz = sizeof(buf);
+    if (_NSGetExecutablePath(buf, &sz) == 0) return buf;
+    return "?";
+}
+
+static uint32_t vx_count(void) {
+    static BOOL busy = NO;
+    if (!orig_count) { if (busy) return 1; busy = YES; VXOrig(); busy = NO; }
+    uint32_t n = orig_count ? orig_count() : 1;
+    if (g_hideIdx < 0 || n == 0) return n;
+    return n - 1;
+}
+
+static const char *vx_name(uint32_t i) {
+    static BOOL busy = NO;
+    if (!orig_name) { if (busy) return VXFallback(); busy = YES; VXOrig(); busy = NO; }
+    if (!orig_name) return VXFallback();
+    uint32_t n = orig_count ? orig_count() : 0;
+    uint32_t idx = (g_hideIdx >= 0 && (int)i >= g_hideIdx) ? i + 1 : i;
+    if ((int)idx >= (int)n) return NULL;
+    return orig_name(idx);
+}
+
+__attribute__((used, section("__DATA,__interpose")))
+static const void *vx_pairs[][2] = {
+    { (const void *)vx_count, (const void *)_dyld_image_count },
+    { (const void *)vx_name,  (const void *)_dyld_get_image_name },
+};
+
+static void VXHideSelf(void) {
+    VXOrig();
+    uint32_t n = orig_count ? orig_count() : 0;
+    for (uint32_t i = 1; i < n; i++) {
+        const char *nm = orig_name ? orig_name(i) : NULL;
+        if (!nm) continue;
+        if (strstr(nm, "hlslcc") || strstr(nm, "veex")) { g_hideIdx = (int)i; return; }
+    }
+}
 
 static void VXText(NSString *t) {
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -92,7 +145,7 @@ static void VXDump(void) {
     void **as = da(d, &n);
     if (!as) { VXText(@"sin ensamblados"); return; }
 
-    [o appendFormat:@"ensamblados %zu\n\n=== LISTA ===\n", n];
+    [o appendFormat:@"oculto: %d\nensamblados: %zu\n\n=== LISTA ===\n", g_hideIdx, n];
     for (size_t i = 0; i < n; i++) {
         void *a = *(void **)((char *)as + 0x20 + i * 8);
         if (!a) continue;
@@ -159,6 +212,7 @@ static void VXButton(void) {
 }
 
 __attribute__((constructor)) static void VXInit(void) {
+    VXHideSelf();
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(12 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{ VXButton(); });
 }
