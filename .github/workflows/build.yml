@@ -27,8 +27,9 @@ jobs:
           F=$(ls *.ipa | head -1)
           echo "USANDO: $F"
           unzip -q "$F" -d app
-          echo "APP=$PWD/app/Payload/$(ls app/Payload)" >> $GITHUB_ENV
-          ls -la "$APP" | head
+          A="$PWD/app/Payload/$(ls app/Payload)"
+          echo "APP=$A" >> $GITHUB_ENV
+          ls -la "$A" | head
 
       - name: Compilar
         run: |
@@ -68,7 +69,6 @@ jobs:
           cd work/app
           zip -qry ../../Veex.ipa Payload
           cd ../..
-          echo "--- contenido del zip ---"
           unzip -l Veex.ipa | head -6
           ls -la Veex.ipa
 
