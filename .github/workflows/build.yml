@@ -6,8 +6,6 @@ on:
 jobs:
   build:
     runs-on: macos-15
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
       - uses: actions/checkout@v4
@@ -16,17 +14,41 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p work out
-          gh release download --repo "$GITHUB_REPOSITORY" --pattern "*.ipa" --dir work --clobber
-          stat -f "%z %N" work/*.ipa
+          python3 -m pip install --quiet --break-system-packages requests
+          python3 - <<'PY'
+          import re, sys, time, requests
+
+          URL = "https://www.mediafire.com/file/od7voveps5u10c1/file"
+          H = {"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+                             "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"}
+          PAT = r'https?://download[0-9]*\.mediafire\.com/[^"\'\s<>\\]+'
+
+          link = None
+          for i in range(8):
+              try:
+                  r = requests.get(URL, headers=H, timeout=40)
+                  print("pagina %d: %d bytes" % (i + 1, len(r.text)))
+                  m = re.search(PAT, r.text.replace("\\/", "/"))
+                  if m:
+                      link = m.group(0); break
+              except Exception as e:
+                  print("intento %d: %s" % (i + 1, e))
+              time.sleep(5)
+          if not link:
+              print("sin enlace"); sys.exit(1)
+          print("ok")
+          r = requests.get(link, headers=H, timeout=900, stream=True)
+          r.raise_for_status()
+          with open("work/base.ipa", "wb") as f:
+              for c in r.iter_content(1 << 16): f.write(c)
+          PY
+          ls -la work/
 
       - name: Desempacar
         run: |
           set -euo pipefail
           cd work
-          F=$(ls -S *.ipa | tail -1)
-          echo "USANDO: $F"
-          ls -S *.ipa | tail -n +2 | xargs -r rm -f
-          unzip -q "$F" -d app
+          unzip -q base.ipa -d app
           A="$PWD/app/Payload/$(ls app/Payload)"
           echo "APP=$A" >> $GITHUB_ENV
           echo "UF=$A/Frameworks/UnityFramework.framework/UnityFramework" >> $GITHUB_ENV
@@ -56,13 +78,9 @@ jobs:
           cp out/libveexcore.dylib "$APP/"
           chmod +x "$APP/Frameworks/libveexcore.dylib"
 
-      - name: Verificar inyeccion
+      - name: Verificar
         run: |
           set -euo pipefail
-          echo "--- tamano antes/despues ---"
-          stat -f "%z" /tmp/uf.bak
-          stat -f "%z" "$UF"
-          echo "--- load commands ---"
           otool -L "$UF" | grep -i veex || { echo "NO QUEDO EL LC_LOAD_DYLIB"; exit 1; }
           echo "inyeccion ok"
 
@@ -73,11 +91,7 @@ jobs:
           codesign --force --sign - "$APP/Frameworks/libveexcore.dylib"
           codesign --force --sign - --timestamp=none "$APP/Frameworks/UnityFramework.framework"
           codesign --force --sign - --timestamp=none "$APP"
-
-      - name: Verificar firma
-        run: |
-          set -euo pipefail
-          codesign --verify --deep --strict "$APP" && echo "firma ok"
+          codesign --verify --deep --strict "$APP"
 
       - name: Empaquetar
         run: |
