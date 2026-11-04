@@ -37,7 +37,16 @@ jobs:
           $t = Get-Content build.ps1 -Raw
           $t = $t -replace "\`$Csc = '.*'", "`$Csc = '$($csc.FullName)'"
           Set-Content build.ps1 $t -NoNewline
-          Select-String -Path build.ps1 -Pattern '^\$Csc' | Select-Object -First 1
+
+      - name: Arreglar alignment
+        working-directory: ref
+        shell: powershell
+        run: |
+          $p = 'src\ESPLogic.template.cs'
+          $t = Get-Content $p -Raw
+          $t = $t -replace 'TextAnchor oldAlign = GUI\.skin\.label\.alignment;', 'TextAnchor oldAlign = TextAnchor.UpperLeft;'
+          Set-Content $p $t -NoNewline
+          Select-String -Path $p -Pattern 'oldAlign' | Select-Object -First 2
 
       - name: Compilar parche
         working-directory: ref
