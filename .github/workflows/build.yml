@@ -28,6 +28,7 @@ jobs:
           echo "USANDO: $F"
           unzip -q "$F" -d app
           echo "APP=$PWD/app/Payload/$(ls app/Payload)" >> $GITHUB_ENV
+          ls -la "$APP" | head
 
       - name: Compilar
         run: |
@@ -64,8 +65,12 @@ jobs:
       - name: Empaquetar
         run: |
           set -euo pipefail
-          cd work && zip -qry ../Veex.ipa app
-          cd .. && ls -la Veex.ipa
+          cd work/app
+          zip -qry ../../Veex.ipa Payload
+          cd ../..
+          echo "--- contenido del zip ---"
+          unzip -l Veex.ipa | head -6
+          ls -la Veex.ipa
 
       - uses: actions/upload-artifact@v4
         with:
