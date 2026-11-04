@@ -121,8 +121,7 @@ static void VXUpload(NSString *path) {
                 NSRange end = [txt rangeOfCharacterFromSet:[NSCharacterSet characterSetWithCharactersInString:@"\"\\ "] options:0 range:rest];
                 NSUInteger len = end.location == NSNotFound ? rest.length : end.location - rest.location;
                 NSString *u = [txt substringWithRange:NSMakeRange(k.location, k.length + len)];
-                u = [u stringByReplacingOccurrencesOfString:@"tmpfiles.org/" withString:@"tmpfiles.org/dl/"];
-                VXSay(u);
+                VXSay([u stringByReplacingOccurrencesOfString:@"tmpfiles.org/" withString:@"tmpfiles.org/dl/"]);
                 return;
             }
         }
@@ -310,25 +309,37 @@ static int VXKeychainPurge(void) {
 
 @end
 
+@interface VXWindow : UIWindow
+@property (nonatomic, weak) VeexPanel *panel;
+@end
+@implementation VXWindow
+- (BOOL)pointInside:(CGPoint)p withEvent:(UIEvent *)e {
+    if (self.panel) return [self.panel pointInside:p withEvent:e];
+    return NO;
+}
+@end
+
 static void VXBuildMenu(void) {
     CGRect s = UIScreen.mainScreen.bounds;
-    g_win = [[UIWindow alloc] initWithFrame:s];
-    g_win.windowLevel = UIWindowLevelAlert + 10;
-    g_win.backgroundColor = UIColor.clearColor;
-
+    VXWindow *w = [[VXWindow alloc] initWithFrame:s];
+    w.windowLevel = UIWindowLevelAlert + 10;
+    w.backgroundColor = UIColor.clearColor;
     UIViewController *vc = [UIViewController new];
     vc.view.backgroundColor = UIColor.clearColor;
     vc.view.userInteractionEnabled = NO;
-    g_win.rootViewController = vc;
-    g_win.hidden = NO;
+    w.rootViewController = vc;
+    w.hidden = NO;
+    g_win = w;
 
     VXDraw *d = [[VXDraw alloc] initWithFrame:s];
     d.backgroundColor = UIColor.clearColor;
     d.userInteractionEnabled = NO;
-    [g_win addSubview:d];
+    [w addSubview:d];
     g_draw = d;
 
-    [g_win addSubview:[[VeexPanel alloc] initWithFrame:s]];
+    VeexPanel *p = [[VeexPanel alloc] initWithFrame:s];
+    w.panel = p;
+    [w addSubview:p];
 }
 
 __attribute__((constructor)) static void VXInit(void) {
