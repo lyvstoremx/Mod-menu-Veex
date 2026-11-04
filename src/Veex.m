@@ -87,7 +87,7 @@ static void VXSay(NSString *s) {
 }
 
 - (void)buildBox {
-    _box = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 250, 366)];
+    _box = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 250, 420)];
     _box.backgroundColor = [UIColor colorWithWhite:0.06 alpha:0.94];
     _box.layer.cornerRadius = 14;
     _box.layer.borderWidth = 1;
@@ -142,7 +142,7 @@ static void VXSay(NSString *s) {
     [self boton:@"CARGAR PARCHE" r:_btr[0]];
     [self boton:@"RESET GUEST" r:_btr[1]];
 
-    g_diag = [[UILabel alloc] initWithFrame:CGRectMake(10, 310, 230, 44)];
+    g_diag = [[UILabel alloc] initWithFrame:CGRectMake(10, 310, 230, 100)];
     g_diag.font = [UIFont systemFontOfSize:9];
     g_diag.textColor = UIColor.yellowColor;
     g_diag.numberOfLines = 0;
@@ -353,9 +353,10 @@ static NSString *VXLoadPatch(void) {
     NSMutableString *s = [NSMutableString stringWithString:@"sig:"];
     void *it = NULL, *mm;
     int k = 0;
-    while ((mm = gm(cls, &it)) && k++ < 6) {
+    while ((mm = gm(cls, &it)) && k++ < 8) {
         const char *nm2 = mn(mm);
         if (!nm2) continue;
+        if (!strstr(nm2, "oad") && !strstr(nm2, "read")) continue;
         [s appendFormat:@" %s(", nm2];
         uint32_t np = pc(mm);
         for (uint32_t j = 0; j < np && j < 5; j++) {
