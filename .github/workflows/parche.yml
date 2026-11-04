@@ -50,7 +50,7 @@ jobs:
               }
             }
             if ($lines[$i] -match '^if \(\$(missing|found)\w*\.Count -ne 0\) \{') {
-              $lines[$i] = $lines[$i] -replace '^if \(\$(\w+)\.Count -ne 0\) \{', 'if ($$1.Count -ne 0) { Write-Host "AVISO $$1" }; if ($$false) {'
+              $lines[$i] = $lines[$i] -replace '^if \(\$(\w+)\.Count -ne 0\) \{', 'if ($1.Count -ne 0) { Write-Host "AVISO $1" }; if ($$false) {'
             }
           }
           Set-Content build.ps1 $lines
