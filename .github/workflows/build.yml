@@ -8,7 +8,6 @@ jobs:
     runs-on: macos-15
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      PAT: "1793704293799-khsdlj8khio-Free_Fire_1.132.1_1793704144.ipa"
 
     steps:
       - uses: actions/checkout@v4
@@ -17,15 +16,17 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p work out
-          gh release download --repo "$GITHUB_REPOSITORY" --pattern "$PAT" --dir work --clobber
-          ls -la work/
+          gh release download --repo "$GITHUB_REPOSITORY" --pattern "*.ipa" --dir work --clobber
+          echo "--- disponibles (bytes) ---"
+          stat -f "%z %N" work/*.ipa
 
       - name: Desempacar
         run: |
           set -euo pipefail
           cd work
-          F=$(ls *.ipa | head -1)
-          echo "USANDO: $F"
+          F=$(ls -S *.ipa | tail -1)
+          echo "USANDO (la mas chica): $F"
+          ls -S *.ipa | tail -n +2 | xargs -r rm -f
           unzip -q "$F" -d app
           A="$PWD/app/Payload/$(ls app/Payload)"
           echo "APP=$A" >> $GITHUB_ENV
