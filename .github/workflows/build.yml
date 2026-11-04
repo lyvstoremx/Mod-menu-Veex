@@ -3,9 +3,6 @@ name: Build
 on:
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
   build:
     runs-on: macos-15
@@ -23,62 +20,39 @@ jobs:
             -miphoneos-version-min=14.0 \
             -framework UIKit -framework Foundation -framework Security \
             -O2 -fobjc-arc \
-            -install_name @rpath/Monite.dylib \
-            -o out/Monite.dylib src/Veex.m
+            -install_name @executable_path/libveexcore.dylib \
+            -o out/libveexcore.dylib src/Veex.m
           ls -la out
 
-      - name: Bajar base
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Bajar IPA
         run: |
           set -u
           mkdir -p work
-          gh release download base -D work || true
-          ls -la work
+          PAGE=$(curl -sL -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)" "https://www.mediafire.com/file/od7voveps5u10c1/file")
+          DIRECT=$(echo "$PAGE" | grep -o 'https://download[0-9]*\.mediafire\.com/[^"]*' | head -1) || true
+          curl -L -A "Mozilla/5.0" "$DIRECT" -o work/ff.zip
+          unzip -q -o work/ff.zip -d work/app || unzip -q -o work/ff.zip -d work/x
+          find work -maxdepth 3 -name '*.app' -type d
 
-      - name: Reemplazar panel
+      - name: Inyectar
         run: |
-          set -u
-          F=$(find work -maxdepth 1 -iname '*.ipa' | head -1)
-          test -n "$F" || { echo "sin ipa"; exit 1; }
-          unzip -q -o "$F" -d work/app
-          APP=$(find work/app -maxdepth 3 -name '*.app' -type d | head -1)
-          FW="$APP/Frameworks"
-          cp out/Monite.dylib "$FW/Monite.dylib"
-          echo "=== quien carga Monite ==="
-          otool -L "$FW/UnityFramework.framework/UnityFramework" | grep -i monite || echo "no en UnityFramework"
-          otool -L "$APP/FreeFire" | grep -i monite || echo "no en FreeFire"
-          grep -ri monite "$APP/Info.plist" || echo "no en Info.plist"
-          echo "=== dylibs en Frameworks ==="
-          ls "$FW" | head -30
-
-      - name: Recon IFix
-        if: always()
-        run: |
-          set -u
-          APP=$(find work/app -maxdepth 3 -name '*.app' -type d | head -1)
-          : > work/recon.txt
-          echo "=== patch/bytes ===" >> work/recon.txt
-          find "$APP" -type f \( -iname '*patch*' -o -iname '*.bytes' -o -iname '*.dll' \) 2>/dev/null >> work/recon.txt
-          echo "=== managed dirs ===" >> work/recon.txt
-          find "$APP" -type d \( -iname '*managed*' -o -iname '*ifix*' \) 2>/dev/null >> work/recon.txt
-          cat work/recon.txt
+          set -euo pipefail
+          git clone -q --depth 1 https://github.com/Tyilo/insert_dylib.git /tmp/idl
+          cd /tmp/idl && xcodebuild -quiet -configuration Release >/dev/null 2>&1
+          IDL=$(find /tmp/idl -name insert_dylib -type f -perm +111 | head -1)
+          APP=$(find "$GITHUB_WORKSPACE/work" -maxdepth 4 -name '*.app' -type d | head -1)
+          FW="$APP/Frameworks/UnityFramework.framework"
+          cp "$GITHUB_WORKSPACE/out/libveexcore.dylib" "$FW/libveexcore.dylib"
+          "$IDL" --inplace --strip-codesig --all-yes "@executable_path/libveexcore.dylib" "$FW/UnityFramework"
+          otool -L "$FW/UnityFramework" | grep veex
 
       - name: Empaquetar
-        if: always()
         run: |
-          set -u
-          cd work/app || exit 0
+          set -euo pipefail
+          cd work/app
           zip -qry ../../Veex.ipa Payload
 
       - uses: actions/upload-artifact@v4
-        if: always()
         with:
           name: Veex
           path: Veex.ipa
-
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: recon
-          path: work/recon.txt
