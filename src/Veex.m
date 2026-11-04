@@ -174,9 +174,12 @@ static void VXSay(NSString *s) {
 
 - (void)layoutBox {
     CGFloat w = _box.frame.size.width, h = _box.frame.size.height;
+    CGFloat maxY = self.bounds.size.height - h - 8;
     CGFloat x = _bx + 28 - w / 2;
     CGFloat y = _by - h - 10;
-    if (y < 44) y = _by + 66;
+    if (y > maxY) y = _by + 66;
+    if (y > maxY) y = MAX(8, maxY);
+    if (y < 8) y = 8;
     if (x < 6) x = 6;
     if (x + w > self.bounds.size.width - 6) x = self.bounds.size.width - w - 6;
     _box.frame = CGRectMake(x, y, w, h);
