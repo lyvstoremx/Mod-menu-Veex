@@ -8,8 +8,10 @@
 
 #define VX_HIDE 0
 
+@class VXWindow;
+
 static struct { BOOL esp, aim, fire, visOnly; CGFloat fov; } g;
-static UIWindow *g_win;
+static VXWindow *g_win;
 static UIView *g_draw;
 static UILabel *g_diag;
 static NSString *g_patch;
@@ -158,10 +160,8 @@ static void VXUpload(NSString *path) {
 
 #pragma mark - ventana
 
-@class VeexPanel;
-
 @interface VXWindow : UIWindow
-@property (nonatomic, weak) VeexPanel *panel;
+@property (nonatomic, assign) VeexPanel *panel;
 @end
 
 @implementation VXWindow
