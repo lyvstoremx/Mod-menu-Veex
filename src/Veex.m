@@ -251,8 +251,7 @@ static BOOL VXCargar(void) {
     void *exc = NULL;
     p_inv(m, NULL, args, &exc);
     if (exc) {
-        char *tn = p_tname(cls);
-        VXSay([NSString stringWithFormat:@"9 excepcion %s", tn ? tn : "?"]);
+        VXSay(@"9 excepcion .NET");
         return NO;
     }
 
@@ -263,12 +262,7 @@ static BOOL VXCargar(void) {
 static void VXArmPatch(void) {
     if (g_armed) return;
     g_armed = 1;
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-        for (int i = 0; i < 20; i++) {
-            if (VXCargar()) return;
-            [NSThread sleepForTimeInterval:2.0];
-        }
-    });
+    dispatch_async(dispatch_get_main_queue(), ^{ VXCargar(); });
 }
 
 static void VXResetGuest(void) {
@@ -405,7 +399,7 @@ static void VXResetGuest(void) {
 
 - (void)parche {
     VXSay(@"cargando...");
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ VXCargar(); });
+    dispatch_async(dispatch_get_main_queue(), ^{ VXCargar(); });
 }
 
 - (void)reset { VXResetGuest(); }
@@ -472,11 +466,9 @@ static void VXInit(void) {
 #if VX_HIDE
     return;
 #endif
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(8 * NSEC_PER_SEC)),
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(14 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
         VXInstall();
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(6 * NSEC_PER_SEC)),
-                       dispatch_get_main_queue(), ^{ VXArmPatch(); });
     });
 }
 
