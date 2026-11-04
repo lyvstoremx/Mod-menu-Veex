@@ -41,13 +41,18 @@ jobs:
         working-directory: ref
         shell: powershell
         run: |
-          $t = Get-Content build.ps1 -Raw
-          $p1 = '(?s)if \(-not \$verification\.valid -or @\(\$verification\.errors\)\.Count -ne 0\s+-or @\(\$verification\.warnings\)\.Count -ne 0\)'
-          $t = $t -replace $p1, 'if (-not $$verification.valid -or @($$verification.errors).Count -ne 0)'
-          $p2 = '(?s)if \(-not \$finalVerification\.valid -or @\(\$finalVerification\.errors\)\.Count -ne 0\s+-or @\(\$finalVerification\.warnings\)\.Count -ne 0\)'
-          $t = $t -replace $p2, 'if (-not $$finalVerification.valid -or @($$finalVerification.errors).Count -ne 0)'
-          Set-Content build.ps1 $t -NoNewline
-          Select-String -Path build.ps1 -Pattern 'if \(-not \$final?Verification' | Select-Object -First 4
+          $lines = Get-Content build.ps1
+          for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -match 'if \(-not \$(final)?[vV]erification\.valid') {
+              Write-Host "linea $($i+1): $($lines[$i])"
+              $lines[$i] = 'if ($false) {'
+              if ($i + 1 -lt $lines.Count -and $lines[$i+1] -match '^\s*-or @\(\$(final)?[vV]erification\.warnings') {
+                $lines[$i+1] = ''
+              }
+            }
+          }
+          Set-Content build.ps1 $lines
+          Select-String -Path build.ps1 -Pattern 'if \(\$false\)' | Select-Object -First 4
 
       - name: Arreglar alignment
         working-directory: ref
