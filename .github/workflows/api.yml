@@ -1,0 +1,29 @@
+name: Api
+
+on:
+  workflow_dispatch:
+
+jobs:
+  a:
+    runs-on: windows-latest
+    steps:
+      - name: Traer
+        run: git clone --depth 1 https://github.com/ttanhios1602-beep/3105-MENU.git ref
+
+      - name: Sacar nombres
+        shell: powershell
+        run: |
+          $d = 'ref\baseline\DummyDll\IFix.Core.dll'
+          $s = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($d))
+          $r = [regex]::Matches($s, '[A-Za-z_][A-Za-z0-9_]{3,40}')
+          $r | ForEach-Object { $_.Value } | Sort-Object -Unique |
+            Where-Object { $_ -match 'Patch|Load|Inject|VirtualMachine|Manager' } |
+            Set-Content api.txt
+          Get-Content api.txt | Select-Object -First 120
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: api
+          path: |
+            api.txt
+            ref/baseline/DummyDll/IFix.Core.dll
