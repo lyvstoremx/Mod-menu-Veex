@@ -52,8 +52,10 @@ jobs:
           mkdir -p out
           xcrun -sdk iphoneos clang -arch arm64 -dynamiclib \
             -isysroot "$(xcrun --sdk iphoneos --show-sdk-path)" \
-            -miphoneos-version-min=15.0 -framework Foundation \
-            -framework UIKit -framework QuartzCore -framework Security \
+            -miphoneos-version-min=15.0 \
+            -framework Foundation -framework UIKit \
+            -framework QuartzCore -framework CoreGraphics \
+            -framework CoreFoundation -framework Security \
             -install_name @executable_path/Frameworks/libveexcore.dylib \
             -o out/libveexcore.dylib src/Veex.m
           xcrun -sdk iphoneos strip -x out/libveexcore.dylib
