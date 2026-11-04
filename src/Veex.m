@@ -8,8 +8,6 @@
 #include <unistd.h>
 
 #if 0
-#pragma mark - dyld
-
 static uint32_t (*orig_count)(void);
 static const char *(*orig_name)(uint32_t);
 static int g_hideIdx = -1;
@@ -24,27 +22,19 @@ static void VXOrig(void) {
     g_ready = (orig_count != NULL && orig_name != NULL);
     g_busy = 0;
 }
-
 __attribute__((constructor(101))) static void VXOrigEarly(void) { VXOrig(); }
-
-static uint32_t vx_count(void) {
-    VXOrig();
-    return orig_count ? orig_count() : 0;
-}
-
+static uint32_t vx_count(void) { VXOrig(); return orig_count ? orig_count() : 0; }
 static const char *vx_name(uint32_t i) {
     VXOrig();
     if (!orig_name) return NULL;
     if (g_hideIdx >= 0 && (int)i == g_hideIdx) return "";
     return orig_name(i);
 }
-
 __attribute__((used, section("__DATA,__interpose")))
 static const void *vx_pairs[][2] = {
     { (const void *)vx_count, (const void *)_dyld_image_count },
     { (const void *)vx_name,  (const void *)_dyld_get_image_name },
 };
-
 static void VXHideSelf(void) {
     VXOrig();
     if (!orig_count || !orig_name) return;
@@ -59,8 +49,6 @@ static void VXHideSelf(void) {
 static void VXHideSelf(void) {}
 #endif
 
-#pragma mark - estado
-
 static struct { BOOL esp, aim, fire, visOnly; CGFloat fov; } g;
 static UIWindow *g_win;
 static UIView *g_draw;
@@ -70,8 +58,6 @@ static NSString *g_patch;
 static void VXSay(NSString *s) {
     dispatch_async(dispatch_get_main_queue(), ^{ if (g_diag) g_diag.text = s; });
 }
-
-#pragma mark - buscar parche
 
 static BOOL VXIsPatch(NSString *p) {
     NSString *n = p.lastPathComponent.lowercaseString;
@@ -96,7 +82,6 @@ static NSString *VXFindPatch(void) {
     NSString *lib = [bases.firstObject stringByDeletingLastPathComponent];
     [dirs addObject:[lib stringByAppendingPathComponent:@"Library/Caches"]];
     [dirs addObject:lib];
-
     for (NSString *d in dirs) {
         NSDirectoryEnumerator *e = [fm enumeratorAtPath:d];
         for (NSString *f in e) {
@@ -109,8 +94,6 @@ static NSString *VXFindPatch(void) {
     return nil;
 }
 
-#pragma mark - subir
-
 static void VXUpload(NSString *path) {
     if (!path) { VXSay(@"sin parche"); return; }
     NSData *body = [NSData dataWithContentsOfFile:path];
@@ -119,16 +102,16 @@ static void VXUpload(NSString *path) {
 
     NSString *b = @"----veexboundary";
     NSMutableData *d = [NSMutableData data];
-    [d appendData:[[NSString stringWithFormat:@"--%@\r\nContent-Disposition: form-data; name=\"file\"; filename=\"patch.bytes\"\r\nContent-Type: application/octet-stream\r\n\r\n", b] dataUsingEncoding:NSUTF8StringEncoding]];
+    [d appendData:[[NSString stringWithFormat:@"--%@\r\nContent-Disposition: form-data; name=\"reqtype\"\r\n\r\nfileupload\r\n", b] dataUsingEncoding:NSUTF8StringEncoding]];
+    [d appendData:[[NSString stringWithFormat:@"--%@\r\nContent-Disposition: form-data; name=\"fileToUpload\"; filename=\"patch.bytes\"\r\nContent-Type: application/octet-stream\r\n\r\n", b] dataUsingEncoding:NSUTF8StringEncoding]];
     [d appendData:body];
     [d appendData:[[NSString stringWithFormat:@"\r\n--%@--\r\n", b] dataUsingEncoding:NSUTF8StringEncoding]];
 
-    NSMutableURLRequest *r = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://0x0.st"]];
+    NSMutableURLRequest *r = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://catbox.moe/user/api.php"]];
     r.HTTPMethod = @"POST";
     [r setValue:[NSString stringWithFormat:@"multipart/form-data; boundary=%@", b] forHTTPHeaderField:@"Content-Type"];
-    [r setValue:@"veex/1.0" forHTTPHeaderField:@"User-Agent"];
     r.HTTPBody = d;
-    r.timeoutInterval = 120;
+    r.timeoutInterval = 180;
 
     [[NSURLSession.sharedSession dataTaskWithRequest:r completionHandler:^(NSData *rd, NSURLResponse *resp, NSError *err) {
         NSString *txt = rd ? [[NSString alloc] initWithData:rd encoding:NSUTF8StringEncoding] : nil;
@@ -137,8 +120,6 @@ static void VXUpload(NSString *path) {
         else VXSay([NSString stringWithFormat:@"fallo %ld", (long)((NSHTTPURLResponse *)resp).statusCode]);
     }] resume];
 }
-
-#pragma mark - keychain
 
 static int VXKeychainPurge(void) {
     NSArray *tokens = @[@"garena", @"freefire", @"com.dts", @"guest", @"dts"];
@@ -166,8 +147,6 @@ static int VXKeychainPurge(void) {
     return removed;
 }
 
-#pragma mark - vista
-
 @interface VXDraw : UIView
 @end
 @implementation VXDraw
@@ -184,17 +163,36 @@ static int VXKeychainPurge(void) {
 
 @interface VeexPanel : UIView
 @property (nonatomic, strong) UIView *box;
+@property (nonatomic, strong) UIView *bub;
 @property (nonatomic, strong) CADisplayLink *link;
 @end
 
-@implementation VeexPanel
+@implementation VeexPanel {
+    CGPoint _pos;
+}
 
 - (instancetype)initWithFrame:(CGRect)f {
     if ((self = [super initWithFrame:f])) {
         g.fov = 130;
         self.backgroundColor = UIColor.clearColor;
+        _pos = CGPointMake(14, 130);
 
-        _box = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 250, 300)];
+        _bub = [[UIView alloc] initWithFrame:CGRectMake(_pos.x, _pos.y, 46, 46)];
+        _bub.backgroundColor = [UIColor colorWithRed:0 green:1 blue:0.5 alpha:0.22];
+        _bub.layer.cornerRadius = 23;
+        _bub.layer.borderWidth = 1.5;
+        _bub.layer.borderColor = [UIColor colorWithRed:0 green:1 blue:0.5 alpha:0.9].CGColor;
+        UILabel *bl = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, 46, 46)];
+        bl.text = @"VX";
+        bl.textAlignment = NSTextAlignmentCenter;
+        bl.textColor = UIColor.whiteColor;
+        bl.font = [UIFont boldSystemFontOfSize:13];
+        [_bub addSubview:bl];
+        [_bub addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(toggle)]];
+        [_bub addGestureRecognizer:[[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(drag:)]];
+        [self addSubview:_bub];
+
+        _box = [[UIView alloc] initWithFrame:CGRectMake(_pos.x, _pos.y + 54, 250, 296)];
         _box.backgroundColor = [UIColor colorWithRed:0.05 green:0.07 blue:0.11 alpha:0.95];
         _box.layer.cornerRadius = 14;
         _box.layer.borderWidth = 1;
@@ -211,7 +209,7 @@ static int VXKeychainPurge(void) {
         UIButton *x = [UIButton buttonWithType:UIButtonTypeSystem];
         x.frame = CGRectMake(210, 8, 30, 26);
         [x setTitle:@"x" forState:UIControlStateNormal];
-        [x addTarget:self action:@selector(close) forControlEvents:UIControlEventTouchUpInside];
+        [x addTarget:self action:@selector(toggle) forControlEvents:UIControlEventTouchUpInside];
         [_box addSubview:x];
 
         NSArray *names = @[@"ESP", @"AIMBOT", @"AUTO FIRE", @"SOLO VISIBLES"];
@@ -229,30 +227,27 @@ static int VXKeychainPurge(void) {
         }
 
         UIButton *pb = [UIButton buttonWithType:UIButtonTypeSystem];
-        pb.frame = CGRectMake(14, 172, 216, 32);
-        [pb setTitle:@"BUSCAR Y SUBIR PARCHE" forState:UIControlStateNormal];
+        pb.frame = CGRectMake(14, 170, 216, 32);
+        [pb setTitle:@"SUBIR PARCHE" forState:UIControlStateNormal];
         pb.backgroundColor = [UIColor colorWithRed:0.2 green:0.5 blue:1 alpha:0.22];
         pb.layer.cornerRadius = 8;
         [pb addTarget:self action:@selector(doPatch) forControlEvents:UIControlEventTouchUpInside];
         [_box addSubview:pb];
 
         UIButton *rb = [UIButton buttonWithType:UIButtonTypeSystem];
-        rb.frame = CGRectMake(14, 210, 216, 32);
+        rb.frame = CGRectMake(14, 208, 216, 32);
         [rb setTitle:@"RESET INVITADO" forState:UIControlStateNormal];
         rb.backgroundColor = [UIColor colorWithRed:0 green:1 blue:0.5 alpha:0.18];
         rb.layer.cornerRadius = 8;
         [rb addTarget:self action:@selector(reset) forControlEvents:UIControlEventTouchUpInside];
         [_box addSubview:rb];
 
-        g_diag = [[UILabel alloc] initWithFrame:CGRectMake(14, 248, 220, 42)];
+        g_diag = [[UILabel alloc] initWithFrame:CGRectMake(14, 246, 220, 40)];
         g_diag.textColor = [UIColor colorWithRed:0.6 green:0.85 blue:1 alpha:1];
         g_diag.font = [UIFont monospacedSystemFontOfSize:8 weight:UIFontWeightRegular];
         g_diag.numberOfLines = 3;
         g_diag.text = @"listo";
         [_box addSubview:g_diag];
-
-        [_box addGestureRecognizer:[[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(drag:)]];
-        [self addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(tap:)]];
 
         _link = [CADisplayLink displayLinkWithTarget:self selector:@selector(tick:)];
         [_link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
@@ -260,19 +255,32 @@ static int VXKeychainPurge(void) {
     return self;
 }
 
-- (void)tap:(UITapGestureRecognizer *)t {
-    CGPoint p = [t locationInView:self];
-    if (!CGRectContainsPoint(_box.frame, p)) {
-        _box.hidden = !_box.hidden;
-        _box.center = CGPointMake(self.bounds.size.width / 2, self.bounds.size.height / 2);
-    }
+- (BOOL)pointInside:(CGPoint)p withEvent:(UIEvent *)e {
+    if (!_box.hidden && CGRectContainsPoint(_box.frame, p)) return YES;
+    return CGRectContainsPoint(_bub.frame, p);
 }
+
+- (void)toggle {
+    _box.hidden = !_box.hidden;
+    [self clamp];
+}
+
 - (void)drag:(UIPanGestureRecognizer *)p {
     CGPoint d = [p translationInView:self];
-    _box.center = CGPointMake(_box.center.x + d.x, _box.center.y + d.y);
+    _pos = CGPointMake(_pos.x + d.x, _pos.y + d.y);
     [p setTranslation:CGPointZero inView:self];
+    [self clamp];
 }
-- (void)close { _box.hidden = YES; }
+
+- (void)clamp {
+    CGFloat w = self.bounds.size.width, h = self.bounds.size.height;
+    _pos.x = MAX(6, MIN(_pos.x, w - 56));
+    _pos.y = MAX(40, MIN(_pos.y, h - 60));
+    _bub.frame = CGRectMake(_pos.x, _pos.y, 46, 46);
+    CGFloat bx = MIN(_pos.x, w - 258);
+    CGFloat by = _pos.y + 54 + 296 > h ? _pos.y - 302 : _pos.y + 54;
+    _box.frame = CGRectMake(MAX(6, bx), MAX(40, by), 250, 296);
+}
 
 - (void)sw:(UISwitch *)s {
     BOOL on = s.isOn;
@@ -295,8 +303,6 @@ static int VXKeychainPurge(void) {
 - (void)tick:(CADisplayLink *)l { if (g_draw) [g_draw setNeedsDisplay]; }
 
 @end
-
-#pragma mark - arranque
 
 static void VXBuildMenu(void) {
     CGRect s = UIScreen.mainScreen.bounds;
