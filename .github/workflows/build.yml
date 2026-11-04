@@ -1,4 +1,4 @@
-name: Inspect
+name: Build
 
 on:
   workflow_dispatch:
@@ -7,12 +7,25 @@ permissions:
   contents: write
 
 jobs:
-  ins:
+  build:
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Compilar
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          xcrun -sdk iphoneos clang -arch arm64 -dynamiclib \
+            -isysroot "$(xcrun -sdk iphoneos --show-sdk-path)" \
+            -miphoneos-version-min=14.0 \
+            -framework UIKit -framework Foundation -framework Security \
+            -O2 -fobjc-arc \
+            -install_name @rpath/Monite.dylib \
+            -o out/Monite.dylib src/Veex.m
+          ls -la out
 
       - name: Bajar base
         env:
@@ -23,42 +36,46 @@ jobs:
           gh release download base -D work || true
           ls -la work
 
-      - name: Analizar
+      - name: Reemplazar panel
         run: |
           set -u
           F=$(find work -maxdepth 1 -iname '*.ipa' | head -1)
-          echo "ipa: $F"
           test -n "$F" || { echo "sin ipa"; exit 1; }
-          mkdir -p work/app
           unzip -q -o "$F" -d work/app
           APP=$(find work/app -maxdepth 3 -name '*.app' -type d | head -1)
           echo "app: $APP"
-          UF="$APP/Frameworks/UnityFramework.framework/UnityFramework"
-          {
-            echo "=== CRYPTID"
-            otool -l "$UF" | grep -A4 LC_ENCRYPTION_INFO | grep cryptid
-            echo "=== DYLIBS"
-            find "$APP" -iname '*.dylib' | sed 's|.*/||' | sort -u
-            echo "=== LOAD"
-            otool -L "$UF" | grep -vi '/usr/lib\|/System'
-            echo "=== FRAMEWORKS"
-            ls "$APP/Frameworks" 2>/dev/null
-          } > work/report.txt 2>&1
-          cat work/report.txt
+          FW="$APP/Frameworks"
+          ls "$FW" | grep -i monite || { echo "no hay Monite.dylib"; exit 1; }
+          cp out/Monite.dylib "$FW/Monite.dylib"
+          lipo -info "$FW/Monite.dylib"
+          otool -L "$APP/Frameworks/UnityFramework.framework/UnityFramework" | grep -i monite
 
-      - name: Cadenas dylibs
+      - name: Recon IFix
         run: |
           set -u
           APP=$(find work/app -maxdepth 3 -name '*.app' -type d | head -1)
-          : > work/keys.txt
-          find "$APP" -iname '*.dylib' | while read -r D; do
-            echo "=== $(basename "$D")" >> work/keys.txt
-            strings -n 5 "$D" 2>/dev/null | grep -Eio 'keyauth|fluck|bypass|antiban|anti-ban|license|api\.[a-z0-9.-]+|https://[a-z0-9./-]{6,60}' | sort -u | head -40 >> work/keys.txt
-          done
-          head -120 work/keys.txt
+          : > work/recon.txt
+          echo "=== patch/bytes ===" >> work/recon.txt
+          find "$APP" -type f \( -iname '*patch*' -o -iname '*.bytes' -o -iname '*.dll' \) 2>/dev/null >> work/recon.txt
+          echo "=== managed dirs ===" >> work/recon.txt
+          find "$APP" -type d -iname '*managed*' -o -type d -iname '*ifix*' 2>/dev/null >> work/recon.txt
+          cat work/recon.txt
+
+      - name: Empaquetar
+        run: |
+          set -euo pipefail
+          cd work/app
+          zip -qry ../../Veex.ipa Payload
+          cd ../..
+          ls -la Veex.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Veex
+          path: Veex.ipa
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: inspect
-          path: work/*.txt
+          name: recon
+          path: work/recon.txt
