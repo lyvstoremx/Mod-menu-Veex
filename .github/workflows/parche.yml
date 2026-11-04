@@ -6,6 +6,8 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
@@ -107,7 +109,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $ok = $true
-          try { gh release view base --repo "$env:GITHUB_REPOSITORY" | Out-Null } catch { $ok = $false }
-          if (-not $ok) { gh release create base --title base --repo "$env:GITHUB_REPOSITORY" }
+          gh release create base --title base --repo "$env:GITHUB_REPOSITORY" 2>$null
           gh release upload base ref\dist\Assembly-CSharp-patch.bytes --clobber --repo "$env:GITHUB_REPOSITORY"
+          gh release view base --repo "$env:GITHUB_REPOSITORY"
