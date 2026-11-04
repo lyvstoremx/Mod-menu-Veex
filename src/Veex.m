@@ -11,6 +11,8 @@
 @class VXWindow;
 @class VeexPanel;
 
+static void VXArmPatch(void);
+
 static struct { BOOL esp, aim, fire, visOnly; CGFloat fov; } g;
 static VXWindow *g_win;
 static UIView *g_draw;
