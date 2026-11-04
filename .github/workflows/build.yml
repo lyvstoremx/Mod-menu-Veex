@@ -49,6 +49,19 @@ jobs:
           "$IDL" --inplace --strip-codesig --all-yes "@executable_path/libveexcore.dylib" "$FW/UnityFramework"
           otool -L "$FW/UnityFramework" | grep veex
 
+      - name: Analizar parche
+        if: always()
+        run: |
+          set -u
+          mkdir -p work/p
+          curl -sL "https://tmpfiles.org/dl/1793768828.c0526b5215bf19aa/wxAlo8FzS5Aw/patch.bytes" -o work/p/patch.bytes || true
+          ls -la work/p
+          file work/p/patch.bytes
+          xxd work/p/patch.bytes | head -5
+          strings -n 4 work/p/patch.bytes | grep -Ei 'aim|head|esp|enemy|player|shoot|fire|bone|fov|damage|wall|name|hp' | sort -u | head -400 > work/p/claves.txt
+          wc -l work/p/claves.txt
+          head -80 work/p/claves.txt
+
       - name: Empaquetar
         run: |
           set -euo pipefail
@@ -59,3 +72,9 @@ jobs:
         with:
           name: Veex
           path: Veex.ipa
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: claves
+          path: work/p/claves.txt
