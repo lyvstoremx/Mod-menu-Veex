@@ -19,6 +19,7 @@ jobs:
             -isysroot "$(xcrun -sdk iphoneos --show-sdk-path)" \
             -miphoneos-version-min=14.0 \
             -framework UIKit -framework Foundation -framework Security \
+            -framework CoreGraphics -framework QuartzCore \
             -O2 -fobjc-arc \
             -install_name @executable_path/libveexcore.dylib \
             -o out/libveexcore.dylib src/Veex.m
