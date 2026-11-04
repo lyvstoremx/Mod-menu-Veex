@@ -9,6 +9,7 @@
 #define VX_HIDE 0
 
 @class VXWindow;
+@class VeexPanel;
 
 static struct { BOOL esp, aim, fire, visOnly; CGFloat fov; } g;
 static VXWindow *g_win;
