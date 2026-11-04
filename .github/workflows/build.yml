@@ -1,142 +1,64 @@
-name: Veex
+name: Inspect
 
 on:
   workflow_dispatch:
-    inputs:
-      password:
-        description: "Apple ID password"
-        required: true
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  build:
+  ins:
     runs-on: macos-15
-    timeout-minutes: 60
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Compilar
-        run: |
-          set -euo pipefail
-          mkdir -p out
-          xcrun -sdk iphoneos clang -arch arm64 -dynamiclib \
-            -isysroot "$(xcrun --sdk iphoneos --show-sdk-path)" \
-            -miphoneos-version-min=13.0 \
-            -framework UIKit -framework Foundation -framework Security \
-            -O2 -fobjc-arc \
-            -install_name @executable_path/libveexcore.dylib \
-            -o out/libveexcore.dylib src/Veex.m
-          ls -la out
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: dylib
-          path: out/libveexcore.dylib
-
-      - name: Instalar ipatool
-        run: |
-          set -u
-          mkdir -p "$RUNNER_TEMP/ipa"
-          cd "$RUNNER_TEMP/ipa"
-          BASE=https://github.com/majd/ipatool/releases/download/v2.7.0
-          if ! curl -fsSL "$BASE/ipatool-2.7.0-macos-arm64.tar.gz" -o ipatool.tar.gz; then
-            curl -fsSL "$BASE/ipatool-2.7.0-macos-amd64.tar.gz" -o ipatool.tar.gz
-          fi
-          tar xzf ipatool.tar.gz
-          BIN=$(find . -type f ! -name '*.tar.gz' | head -1)
-          cp "$BIN" ./ipatool
-          chmod +x ./ipatool
-          echo "$RUNNER_TEMP/ipa" >> "$GITHUB_PATH"
-
-      - name: Cache sesion
-        uses: actions/cache@v4
-        with:
-          path: ~/.ipatool
-          key: ipatool-auth-v2
-
-      - name: Login
+      - name: Bajar base
         env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PW: ${{ inputs.password }}
-          TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -u
-          if ipatool auth info >/dev/null 2>&1; then
-            echo "sesion ya guardada"
-            exit 0
-          fi
-          rm -f /tmp/fifo login.log
-          mkfifo /tmp/fifo
-          ipatool auth login -e "$APPLE_ID" -p "$APPLE_PW" < /tmp/fifo > login.log 2>&1 &
-          PID=$!
-          exec 3> /tmp/fifo
-          CODE=""
-          for i in $(seq 1 55); do
-            sleep 10
-            API="https://api.github.com/repos/lyvstoremx/Mod-menu-Veex/contents/code.txt?ref=main&t=$i"
-            C=$(curl -s -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" "$API" | jq -r '.content // empty' | base64 -d 2>/dev/null | tr -d '[:space:]') || true
-            echo "poll $i -> '$C'"
-            if echo "$C" | grep -Eq '^[0-9]{6}$'; then
-              CODE=$C
-              break
-            fi
-            if ! kill -0 $PID 2>/dev/null; then
-              echo "ipatool termino antes"
-              break
-            fi
-          done
-          cat login.log || true
-          if [ -z "$CODE" ]; then
-            echo "::warning::No llego codigo, sigo sin IPA"
-            kill $PID 2>/dev/null || true
-            exit 0
-          fi
-          echo "$CODE" >&3
-          wait $PID || true
-          cat login.log || true
-
-      - name: Descargar IPA oficial
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -u
           mkdir -p work
-          ipatool auth info >/dev/null 2>&1 || { echo "sin sesion"; exit 0; }
-          ipatool download -b com.dts.freefireth -o "$PWD/work/ff.ipa" --non-interactive 2>&1 | tee dl.log || true
-          test -s work/ff.ipa || { echo "descarga fallida"; exit 0; }
+          gh release download base -D work || true
+          ls -la work
 
-      - name: Verificar cifrado
+      - name: Analizar
         run: |
           set -u
-          test -s work/ff.ipa || exit 0
-          cd work
-          unzip -q ff.ipa -d app
-          UF=$(ls -d "$PWD"/app/Payload/*.app)/Frameworks/UnityFramework.framework/UnityFramework
-          otool -l "$UF" | grep -A4 LC_ENCRYPTION_INFO | grep cryptid
-
-      - name: Inyectar
-        run: |
-          set -euo pipefail
-          test -s work/ff.ipa || exit 0
-          git clone -q --depth 1 https://github.com/Tyilo/insert_dylib.git /tmp/idl
-          cd /tmp/idl && xcodebuild -quiet -configuration Release >/dev/null 2>&1
-          IDL=$(find /tmp/idl -name insert_dylib -type f -perm +111 | head -1)
-          APP=$(ls -d "$GITHUB_WORKSPACE"/work/app/Payload/*.app | head -1)
+          F=$(find work -maxdepth 1 -iname '*.ipa' | head -1)
+          echo "ipa: $F"
+          test -n "$F" || { echo "sin ipa"; exit 1; }
+          mkdir -p work/app
+          unzip -q -o "$F" -d work/app
+          APP=$(find work/app -maxdepth 3 -name '*.app' -type d | head -1)
+          echo "app: $APP"
           UF="$APP/Frameworks/UnityFramework.framework/UnityFramework"
-          cp "$GITHUB_WORKSPACE/out/libveexcore.dylib" "$APP/Frameworks/UnityFramework.framework/libveexcore.dylib"
-          "$IDL" --inplace --strip-codesig --all-yes "@executable_path/libveexcore.dylib" "$UF"
-          otool -L "$UF" | grep veexcore
+          {
+            echo "=== CRYPTID"
+            otool -l "$UF" | grep -A4 LC_ENCRYPTION_INFO | grep cryptid
+            echo "=== DYLIBS"
+            find "$APP" -iname '*.dylib' | sed 's|.*/||' | sort -u
+            echo "=== LOAD"
+            otool -L "$UF" | grep -vi '/usr/lib\|/System'
+            echo "=== FRAMEWORKS"
+            ls "$APP/Frameworks" 2>/dev/null
+          } > work/report.txt 2>&1
+          cat work/report.txt
 
-      - name: Empaquetar
+      - name: Cadenas dylibs
         run: |
-          set -euo pipefail
-          test -s work/ff.ipa || exit 0
-          cd work/app
-          zip -qry ../../Veex.ipa Payload
+          set -u
+          APP=$(find work/app -maxdepth 3 -name '*.app' -type d | head -1)
+          : > work/keys.txt
+          find "$APP" -iname '*.dylib' | while read -r D; do
+            echo "=== $(basename "$D")" >> work/keys.txt
+            strings -n 5 "$D" 2>/dev/null | grep -Eio 'keyauth|fluck|bypass|antiban|anti-ban|license|api\.[a-z0-9.-]+|https://[a-z0-9./-]{6,60}' | sort -u | head -40 >> work/keys.txt
+          done
+          head -120 work/keys.txt
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: Veex
-          path: Veex.ipa
+          name: inspect
+          path: work/*.txt
