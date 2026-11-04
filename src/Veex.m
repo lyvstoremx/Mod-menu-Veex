@@ -313,11 +313,7 @@ typedef void *(*fn_class_from_name)(void *, const char *, const char *);
 typedef void *(*fn_class_get_method_from_name)(void *, const char *, int);
 typedef void *(*fn_runtime_invoke)(void *, void *, void **, void **);
 typedef void *(*fn_array_new)(void *, size_t);
-typedef void *(*fn_class_get_methods)(void *, void **);
-typedef const char *(*fn_method_get_name)(void *);
-typedef uint32_t (*fn_method_param_count)(void *);
-typedef void *(*fn_method_get_param)(void *, uint32_t);
-typedef const char *(*fn_type_get_name)(void *);
+typedef void *(*fn_object_new)(void *);
 
 static void *VXS(const char *n) { return dlsym(RTLD_DEFAULT, n); }
 
@@ -327,12 +323,11 @@ static NSString *VXLoadPatch(void) {
     fn_assembly_get_image ai = VXS("il2cpp_assembly_get_image");
     fn_image_get_name inm = VXS("il2cpp_image_get_name");
     fn_class_from_name cf = VXS("il2cpp_class_from_name");
-    fn_class_get_methods gm = VXS("il2cpp_class_get_methods");
-    fn_method_get_name mn = VXS("il2cpp_method_get_name");
-    fn_method_param_count pc = VXS("il2cpp_method_get_param_count");
-    fn_method_get_param mp = VXS("il2cpp_method_get_param");
-    fn_type_get_name tn = VXS("il2cpp_type_get_name");
-    if (!dg || !ga || !ai || !inm || !cf) return @"1 sin simbolos";
+    fn_class_get_method_from_name cm = VXS("il2cpp_class_get_method_from_name");
+    fn_runtime_invoke ri = VXS("il2cpp_runtime_invoke");
+    fn_array_new an = VXS("il2cpp_array_new");
+    fn_object_new on = VXS("il2cpp_object_new");
+    if (!dg || !ga || !ai || !inm || !cf || !cm || !ri || !an || !on) return @"1 sin simbolos";
 
     void *dom = dg();
     if (!dom) return @"2 sin dominio";
@@ -340,36 +335,55 @@ static NSString *VXLoadPatch(void) {
     void **as = ga(dom, &n);
     if (!as || n == 0) return @"3 sin ensamblados";
 
-    void *img = NULL;
+    void *img = NULL, *msc = NULL;
     for (size_t i = 0; i < n; i++) {
         void *im = ai(as[i]);
         const char *nm = im ? inm(im) : NULL;
-        if (nm && strstr(nm, "IFix.Core")) { img = im; break; }
+        if (!nm) continue;
+        if (strstr(nm, "IFix.Core")) img = im;
+        if (strstr(nm, "mscorlib")) msc = im;
     }
     if (!img) return [NSString stringWithFormat:@"4 sin IFix (de %zu)", n];
+    if (!msc) return @"5 sin mscorlib";
 
     void *cls = cf(img, "IFix.Core", "PatchManager");
     if (!cls) return @"6 sin PatchManager";
 
-    if (!gm || !mn || !pc || !mp || !tn) return @"sin firmas";
+    void *m = cm(cls, "OptimizeLoad", 4);
+    if (!m) return @"9 sin OptimizeLoad";
 
-    NSMutableString *s = [NSMutableString stringWithString:@"sig:"];
-    void *it = NULL, *mm;
-    int k = 0;
-    while ((mm = gm(cls, &it)) && k++ < 8) {
-        const char *nm2 = mn(mm);
-        if (!nm2) continue;
-        if (!strstr(nm2, "oad") && !strstr(nm2, "read")) continue;
-        [s appendFormat:@" %s(", nm2];
-        uint32_t np = pc(mm);
-        for (uint32_t j = 0; j < np && j < 5; j++) {
-            void *ty = mp(mm, j);
-            const char *tname = ty ? tn(ty) : NULL;
-            [s appendFormat:@"%s,", tname ? tname : "?"];
-        }
-        [s appendString:@")"];
+    NSString *dst = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/Assembly-CSharp.patch.bytes"];
+    NSData *d = [NSData dataWithContentsOfFile:dst];
+    if (!d) {
+        NSString *src = [[[NSBundle mainBundle] bundlePath] stringByAppendingPathComponent:@"veexpatch.bin"];
+        d = [NSData dataWithContentsOfFile:src];
+        if (!d) return @"7 sin archivo";
+        [d writeToFile:dst atomically:YES];
     }
-    return s;
+
+    void *byteCls = cf(msc, "System", "Byte");
+    if (!byteCls) return @"8 sin Byte";
+    void *arr = an(byteCls, d.length);
+    if (!arr) return @"10 sin arreglo";
+    memcpy((char *)arr + 0x20, d.bytes, d.length);
+
+    void *msCls = cf(msc, "System.IO", "MemoryStream");
+    if (!msCls) return @"12 sin MemoryStream";
+    void *ctor = cm(msCls, ".ctor", 1);
+    if (!ctor) return @"13 sin ctor";
+    void *ms = on(msCls);
+    if (!ms) return @"14 sin objeto";
+
+    void *exc = NULL;
+    void *cargs[1] = { arr };
+    ri(ctor, ms, cargs, &exc);
+    if (exc) return @"15 exc ctor";
+
+    int one = 1;
+    void *oargs[4] = { NULL, NULL, ms, &one };
+    exc = NULL;
+    ri(m, NULL, oargs, &exc);
+    return exc ? @"16 exc load" : @"ok";
 }
 
 static void VXArmPatch(void) {
