@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
 
@@ -30,7 +30,7 @@ jobs:
           key = sys.argv[1]
           H = {"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15"}
           link = None
-          for i in range(6):
+          for i in range(8):
               try:
                   r = requests.get("https://www.mediafire.com/file/%s/file" % key, headers=H, timeout=40)
                   print("pagina %d: %d bytes" % (i + 1, len(r.text)))
@@ -40,7 +40,7 @@ jobs:
                       break
               except Exception as e:
                   print("intento %d: %s" % (i + 1, e))
-              time.sleep(5)
+              time.sleep(6)
           if not link:
               print("sin enlace"); sys.exit(1)
           print("ok: %s" % link.split("?")[0])
@@ -51,13 +51,16 @@ jobs:
                   f.write(c)
           PY
           ls -la work/
+          head -c 2 work/base.ipa | grep -q PK || { echo "no es zip"; exit 1; }
 
       - name: Desempacar
         run: |
           set -euo pipefail
           cd work && unzip -q base.ipa -d app
-          A="$(ls -d app/Payload/*.app | head -1)"
+          A="$(find app/Payload -maxdepth 1 -name '*.app' | head -1)"
+          [ -n "$A" ] || { echo "sin .app"; exit 1; }
           echo "APP=$PWD/$A" >> $GITHUB_ENV
+          ls "$PWD/$A" | head -20
 
       - name: Compilar
         run: |
@@ -70,6 +73,7 @@ jobs:
             -install_name @executable_path/Frameworks/libveexcore.dylib \
             -o out/libveexcore.dylib src/Veex.m
           xcrun -sdk iphoneos strip -x out/libveexcore.dylib
+          ls -la out/
 
       - name: Inyectar
         run: |
@@ -114,7 +118,9 @@ jobs:
           </plist>
           P
           find "$APP" -name '*.dylib' -exec codesign --force --sign - {} \;
-          find "$APP/Frameworks" -name '*.framework' -maxdepth 2 -exec codesign --force --sign - {} \; 2>/dev/null || true
+          for f in "$APP"/Frameworks/*.framework; do
+            [ -d "$f" ] && codesign --force --sign - "$f" || true
+          done
           codesign --force --sign - --entitlements work/ent.plist "$APP"
 
       - name: Empaquetar
