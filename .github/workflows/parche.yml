@@ -49,12 +49,13 @@ jobs:
                 $lines[$i+1] = ''
               }
             }
-            if ($lines[$i] -match '^if \(\$(missing|found)\w*\.Count -ne 0\) \{') {
-              $lines[$i] = $lines[$i] -replace '^if \(\$(\w+)\.Count -ne 0\) \{', 'if ($1.Count -ne 0) { Write-Host "AVISO $1" }; if ($$false) {'
+            if ($lines[$i] -match '^if \(\$(\w+)\.Count -ne 0\) \{') {
+              $n = $matches[1]
+              $lines[$i] = 'if ($' + $n + '.Count -ne 0) { Write-Host "AVISO ' + $n + '" }; if ($false) {'
             }
           }
           Set-Content build.ps1 $lines
-          Select-String -Path build.ps1 -Pattern 'AVISO|if \(\$false\)' | Select-Object -First 10
+          Select-String -Path build.ps1 -Pattern 'AVISO' | Select-Object -First 10
 
       - name: Arreglar alignment
         working-directory: ref
