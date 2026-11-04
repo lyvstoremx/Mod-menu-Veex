@@ -1,193 +1,53 @@
-name: Veex
-
-on:
-  workflow_dispatch:
-    inputs:
-      ipa_key:
-        description: "Llave MediaFire del IPA base"
-        required: false
-        default: "4eva62qf34t6b46"
-
-permissions:
-  contents: write
-
-jobs:
-  build:
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Dependencias
-        run: python3 -m pip install --quiet --break-system-packages requests lief
-
-      - name: Descargar base
+- name: Obtener base
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -uo pipefail
           mkdir -p work
-          KEY="${{ github.event.inputs.ipa_key }}"
-          python3 - "$KEY" <<'PY'
-          import re, sys, time, requests
+          URL="${{ github.event.inputs.base_url }}"
+          if [ -n "$URL" ]; then
+            echo "desde url"
+            curl -sSL --retry 3 -o work/base.ipa "$URL"
+          fi
+          if [ ! -s work/base.ipa ]; then
+            echo "desde release (Veex54)"
+            gh release download base -p 'Veex54.ipa' -D work 2>/dev/null || true
+            [ -f work/Veex54.ipa ] && mv work/Veex54.ipa work/base.ipa
+          fi
+          if [ ! -s work/base.ipa ]; then
+            echo "desde release (cualquier ipa que no sea la salida)"
+            gh release download base -p '*.ipa' -D work 2>/dev/null || true
+            B="$(find work -maxdepth 1 -name '*.ipa' ! -name 'Veex.ipa' | head -1)"
+            [ -n "$B" ] && mv "$B" work/base.ipa
+          fi
+          if [ ! -s work/base.ipa ]; then
+            echo "desde mediafire"
+            KEY="${{ github.event.inputs.ipa_key }}"
+            python3 - "$KEY" <<'PY'
+          import re, sys, requests
           key = sys.argv[1]
           UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) "
                 "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1")
-          H = {"User-Agent": UA,
-               "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
-               "Accept-Language": "es-MX,es;q=0.9,en;q=0.8",
-               "Referer": "https://www.mediafire.com/"}
           s = requests.Session()
-          s.headers.update(H)
-
-          def api():
+          s.headers.update({"User-Agent": UA, "Referer": "https://www.mediafire.com/"})
+          for c in ["https://www.mediafire.com/download/%s/Veex30.ipa" % key,
+                    "https://www.mediafire.com/download_repair.php?quick_key=%s" % key,
+                    "https://www.mediafire.com/file/%s/file" % key]:
               try:
-                  r = s.get("https://www.mediafire.com/api/1.5/file/get_links.php",
-                            params={"quick_key": key, "link_type": "direct_download",
-                                    "response_format": "json", "version": "1.5"}, timeout=40)
-                  j = r.json()
-                  for l in j.get("response", {}).get("links", []):
-                      d = l.get("direct_download")
-                      if d:
-                          return d
-                  print("api: %s" % j.get("response", {}).get("message", "sin links"))
-              except Exception as e:
-                  print("api: %s" % e)
-              return None
-
-          def repair():
-              try:
-                  r = s.get("https://www.mediafire.com/download_repair.php",
-                            params={"quick_key": key}, timeout=40)
+                  r = s.get(c, timeout=40)
                   m = re.search(r'https?://download[0-9]*\.mediafire\.com/[^"\'\s<>\\]+',
                                 r.text.replace("\\/", "/"))
                   if m:
-                      return m.group(0)
-                  print("repair: %d bytes, sin enlace" % len(r.text))
-              except Exception as e:
-                  print("repair: %s" % e)
-              return None
-
-          def page():
-              try:
-                  r = s.get("https://www.mediafire.com/file/%s/file" % key, timeout=40)
-                  t = r.text.replace("\\/", "/")
-                  m = re.search(r'https?://download[0-9]*\.mediafire\.com/[^"\'\s<>\\]+', t)
-                  if m:
-                      return m.group(0)
-                  print("pagina: %d bytes, sin enlace" % len(t))
-              except Exception as e:
-                  print("pagina: %s" % e)
-              return None
-
-          link = None
-          for ronda in range(4):
-              for nombre, fn in (("api", api), ("repair", repair), ("pagina", page)):
-                  print("ronda %d %s" % (ronda + 1, nombre))
-                  link = fn()
-                  if link:
+                      d = s.get(m.group(0), stream=True, timeout=900)
+                      d.raise_for_status()
+                      with open("work/base.ipa", "wb") as f:
+                          for x in d.iter_content(1 << 16):
+                              f.write(x)
                       break
-              if link:
-                  break
-              time.sleep(8)
-          if not link:
-              print("sin enlace"); sys.exit(1)
-
-          link = link.split("?")[0]
-          print("enlace: %s" % link)
-
-          for intento in range(4):
-              try:
-                  r = s.get(link, headers={"User-Agent": UA, "Referer": "https://www.mediafire.com/"},
-                            timeout=900, stream=True)
-                  r.raise_for_status()
-                  with open("work/base.ipa", "wb") as f:
-                      for c in r.iter_content(1 << 16):
-                          f.write(c)
-                  break
               except Exception as e:
-                  print("bajada %d: %s" % (intento + 1, e))
-                  time.sleep(10)
+                  print("%s -> %s" % (c, e))
           PY
-          ls -la work/
-          head -c 2 work/base.ipa | grep -q PK || { echo "no es zip"; exit 1; }
-          echo "base ok"
-
-      - name: Desempacar
-        run: |
-          set -euo pipefail
-          cd work && unzip -q base.ipa -d app
-          A="$(find app/Payload -maxdepth 1 -name '*.app' | head -1)"
-          [ -n "$A" ] || { echo "sin .app"; exit 1; }
-          echo "APP=$PWD/$A" >> $GITHUB_ENV
-
-      - name: Compilar
-        run: |
-          set -euo pipefail
-          mkdir -p out
-          xcrun -sdk iphoneos clang -arch arm64 -dynamiclib \
-            -isysroot "$(xcrun --sdk iphoneos --show-sdk-path)" \
-            -miphoneos-version-min=15.0 -framework Foundation \
-            -framework UIKit -framework QuartzCore -framework Security \
-            -install_name @executable_path/Frameworks/libveexcore.dylib \
-            -o out/libveexcore.dylib src/Veex.m
-          xcrun -sdk iphoneos strip -x out/libveexcore.dylib
-
-      - name: Inyectar
-        run: |
-          set -euo pipefail
-          EXE="$APP/$(basename "$APP" .app)"
-          python3 - "$EXE" <<'PY'
-          import lief, sys
-          b = lief.parse(sys.argv[1])
-          b.add_library("libveexcore.dylib")
-          b.write(sys.argv[1])
-          print("LC_LOAD_DYLIB agregado")
-          PY
-          mkdir -p "$APP/Frameworks"
-          cp out/libveexcore.dylib "$APP/Frameworks/"
-          chmod +x "$APP/Frameworks/libveexcore.dylib"
-
-      - name: Parche
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -uo pipefail
-          gh release download base -p 'Assembly-CSharp-patch.bytes' -D work 2>/dev/null || true
-          if [ -f work/Assembly-CSharp-patch.bytes ]; then
-            cp work/Assembly-CSharp-patch.bytes "$APP/"
-            ls -la "$APP/Assembly-CSharp-patch.bytes"
-          else
-            echo "sin parche en el release"
           fi
-
-      - name: Firmar
-        run: |
-          set -euo pipefail
-          rm -rf "$APP/_CodeSignature"
-          cat > work/ent.plist <<'P'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>get-task-allow</key><true/>
-            <key>application-identifier</key><string>com.dts.freefireth</string>
-          </dict>
-          </plist>
-          P
-          find "$APP" -name '*.dylib' -exec codesign --force --sign - {} \;
-          for f in "$APP"/Frameworks/*.framework; do
-            [ -d "$f" ] && codesign --force --sign - "$f" || true
-          done
-          codesign --force --sign - --entitlements work/ent.plist "$APP"
-
-      - name: Empaquetar
-        run: |
-          set -euo pipefail
-          cd work/app && zip -qry ../../Veex.ipa Payload
-          cd ../..
-          ls -la Veex.ipa
-
-      - name: Publicar
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release view base >/dev/null 2>&1 || gh release create base -t base -n base
-          gh release upload base Veex.ipa --clobber
+          ls -la work/
+          head -c 2 work/base.ipa | grep -q PK || { echo "base invalida"; exit 1; }
+          echo "base ok"
