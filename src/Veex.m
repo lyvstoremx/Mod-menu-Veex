@@ -17,135 +17,16 @@ static struct { BOOL esp, aim, fire, visOnly; CGFloat fov; } g;
 static VXWindow *g_win;
 static UIView *g_draw;
 static UILabel *g_diag;
-static NSString *g_patch;
+static UILabel *g_title;
 
 static void VXSay(NSString *s) {
-    dispatch_async(dispatch_get_main_queue(), ^{ if (g_diag) g_diag.text = s; });
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (g_diag) g_diag.text = s;
+        if (g_title) g_title.text = s;
+    });
 }
 
-#pragma mark - parche
-
-static NSString *VXHead(NSString *p) {
-    NSFileHandle *fh = [NSFileHandle fileHandleForReadingAtPath:p];
-    if (!fh) return nil;
-    NSData *d = [fh readDataOfLength:8];
-    [fh closeFile];
-    return [[NSString alloc] initWithData:d encoding:NSISOLatin1StringEncoding];
-}
-
-static BOOL VXIsPatch(NSString *p) {
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSDictionary *a = [fm attributesOfItemAtPath:p error:nil];
-    if (!a) return NO;
-    unsigned long long sz = [a fileSize];
-    if (sz < 5000 || sz > 80000000) return NO;
-    NSString *n = p.lastPathComponent.lowercaseString;
-    if ([n containsString:@"assembly-csharp"] || [n containsString:@"remote_patch"] ||
-        [n containsString:@"patch"] || [n containsString:@"ifix"]) return YES;
-    NSString *h = VXHead(p);
-    return h && ([h hasPrefix:@"IFix"] || [h hasPrefix:@"MZ"]);
-}
-
-static NSString *VXFindPatch(void) {
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSMutableArray *dirs = [NSMutableArray array];
-    NSArray *bases = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-    if (bases.count) [dirs addObject:bases.firstObject];
-    NSString *home = NSHomeDirectory();
-    [dirs addObject:[home stringByAppendingPathComponent:@"Library/Caches"]];
-    [dirs addObject:[home stringByAppendingPathComponent:@"Library/Application Support"]];
-    [dirs addObject:home];
-    [dirs addObject:[[NSBundle mainBundle] bundlePath]];
-
-    NSString *best = nil;
-    int bestScore = 0;
-
-    for (NSString *d in dirs) {
-        NSDirectoryEnumerator *e = [fm enumeratorAtPath:d];
-        for (NSString *f in e) {
-            NSString *n = f.lastPathComponent.lowercaseString;
-            if ([n hasSuffix:@".png"] || [n hasSuffix:@".jpg"] || [n hasSuffix:@".meta"] ||
-                [n hasSuffix:@".car"]) continue;
-            NSString *full = [d stringByAppendingPathComponent:f];
-            if (!VXIsPatch(full)) continue;
-
-            int score = 0;
-            if ([n containsString:@"assembly-csharp"]) score = 100;
-            else if ([n containsString:@"remote_patch"]) score = 90;
-            else if ([n containsString:@"patch"]) score = 80;
-            else if ([n containsString:@"ifix"]) score = 70;
-
-            NSDictionary *a = [fm attributesOfItemAtPath:full error:nil];
-            unsigned long long sz = a ? [a fileSize] : 0;
-            NSString *h = VXHead(full);
-            if (h && [h hasPrefix:@"IFix"]) score += 15;
-            if (h && [h hasPrefix:@"UnityFS"] && sz > 2000000) score -= 40;
-
-            if (score > bestScore) { bestScore = score; best = full; }
-        }
-    }
-    return best;
-}
-
-#pragma mark - subir
-
-static NSString *VXPost(NSURL *url, NSData *body, NSString *ct) {
-    NSMutableURLRequest *r = [NSMutableURLRequest requestWithURL:url];
-    r.HTTPMethod = @"POST";
-    [r setValue:ct forHTTPHeaderField:@"Content-Type"];
-    [r setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15"
-        forHTTPHeaderField:@"User-Agent"];
-    [r setValue:@"https://catbox.moe/" forHTTPHeaderField:@"Referer"];
-    r.HTTPBody = body;
-    r.timeoutInterval = 180;
-
-    __block NSString *out = nil;
-    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
-    [[[NSURLSession sharedSession] dataTaskWithRequest:r
-        completionHandler:^(NSData *d, NSURLResponse *resp, NSError *e) {
-            if (d) out = [[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding];
-            dispatch_semaphore_signal(sem);
-        }] resume];
-    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 190 * NSEC_PER_SEC));
-    return out;
-}
-
-static void VXUpload(NSString *path) {
-    NSData *d = [NSData dataWithContentsOfFile:path];
-    if (!d) { VXSay(@"no pude leer"); return; }
-    VXSay([NSString stringWithFormat:@"subiendo %.1f MB...", d.length / 1048576.0]);
-
-    NSString *b = @"----veexboundary";
-    NSMutableData *body = [NSMutableData data];
-    [body appendData:[[NSString stringWithFormat:
-        @"--%@\r\nContent-Disposition: form-data; name=\"reqtype\"\r\n\r\nfileupload\r\n", b]
-        dataUsingEncoding:NSUTF8StringEncoding]];
-    [body appendData:[[NSString stringWithFormat:
-        @"--%@\r\nContent-Disposition: form-data; name=\"time\"\r\n\r\n72h\r\n", b]
-        dataUsingEncoding:NSUTF8StringEncoding]];
-    [body appendData:[[NSString stringWithFormat:
-        @"--%@\r\nContent-Disposition: form-data; name=\"fileToUpload\"; filename=\"%@\"\r\n"
-        @"Content-Type: application/octet-stream\r\n\r\n", b, path.lastPathComponent]
-        dataUsingEncoding:NSUTF8StringEncoding]];
-    [body appendData:d];
-    [body appendData:[[NSString stringWithFormat:@"\r\n--%@--\r\n", b] dataUsingEncoding:NSUTF8StringEncoding]];
-
-    NSString *ct = [NSString stringWithFormat:@"multipart/form-data; boundary=%@", b];
-
-    for (NSString *s in @[ @"https://catbox.moe/user/api.php",
-                           @"https://litterbox.catbox.moe/resources/internals/api.php" ]) {
-        NSString *r = VXPost([NSURL URLWithString:s], body, ct);
-        r = [r stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-        if (r.length > 10 && [r hasPrefix:@"http"]) {
-            VXSay([NSString stringWithFormat:@"listo:\n%@", r]);
-            UIPasteboard.generalPasteboard.string = r;
-            return;
-        }
-    }
-    VXSay(@"no subió");
-}
-
-#pragma mark - ventana
+#pragma mark - panel
 
 @interface VXWindow : UIWindow
 @property (nonatomic, assign) VeexPanel *panel;
@@ -174,8 +55,6 @@ static void VXUpload(NSString *path) {
 }
 @end
 
-#pragma mark - panel
-
 @interface VeexPanel : UIView
 @property (nonatomic, assign) BOOL open;
 - (void)tick:(CADisplayLink *)l;
@@ -201,12 +80,14 @@ static void VXUpload(NSString *path) {
     self.multipleTouchEnabled = NO;
     _bx = f.size.width - 76;
     _by = f.size.height * 0.35;
+    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(onTap:)];
+    [self addGestureRecognizer:tap];
     [self buildBox];
     return self;
 }
 
 - (void)buildBox {
-    _box = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 250, 330)];
+    _box = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 250, 366)];
     _box.backgroundColor = [UIColor colorWithWhite:0.06 alpha:0.94];
     _box.layer.cornerRadius = 14;
     _box.layer.borderWidth = 1;
@@ -217,9 +98,11 @@ static void VXUpload(NSString *path) {
 
     UILabel *t = [[UILabel alloc] initWithFrame:CGRectMake(14, 10, 220, 20)];
     t.text = @"VEE.X  1.132";
-    t.font = [UIFont boldSystemFontOfSize:14];
+    t.font = [UIFont boldSystemFontOfSize:13];
     t.textColor = UIColor.greenColor;
+    t.adjustsFontSizeToFitWidth = YES;
     [_box addSubview:t];
+    g_title = t;
 
     NSArray *nombres = @[ @"ESP", @"AIM", @"VISIBLE", @"AUTO FIRE" ];
     for (int i = 0; i < 4; i++) {
@@ -259,7 +142,7 @@ static void VXUpload(NSString *path) {
     [self boton:@"CARGAR PARCHE" r:_btr[0]];
     [self boton:@"RESET GUEST" r:_btr[1]];
 
-    g_diag = [[UILabel alloc] initWithFrame:CGRectMake(10, 310, 230, 0)];
+    g_diag = [[UILabel alloc] initWithFrame:CGRectMake(10, 310, 230, 44)];
     g_diag.font = [UIFont systemFontOfSize:9];
     g_diag.textColor = UIColor.yellowColor;
     g_diag.numberOfLines = 0;
@@ -299,41 +182,37 @@ static void VXUpload(NSString *path) {
     _box.frame = CGRectMake(x, y, w, h);
 }
 
+- (void)onTap:(UITapGestureRecognizer *)t {
+    CGPoint p = [t locationInView:self];
+    if (CGRectContainsPoint(self.bubble, p)) { [self setOpen:!self.open]; return; }
+    if (!self.open || !CGRectContainsPoint(_box.frame, p)) { [self setOpen:NO]; return; }
+    [self tocaEn:[self enCaja:p]];
+}
+
 - (void)touchesBegan:(NSSet *)_t withEvent:(UIEvent *)e {
     CGPoint p = [[_t anyObject] locationInView:self];
     _moved = NO; _sliding = NO; _inBox = NO;
-    if (CGRectContainsPoint(self.bubble, p)) {
-        _drag = YES;
-        _off = CGPointMake(p.x - _bx, p.y - _by);
-        return;
-    }
-    _drag = NO;
-    if (!self.open || !CGRectContainsPoint(_box.frame, p)) {
-        [self setOpen:NO];
-        return;
-    }
-    _inBox = YES;
-    if (CGRectContainsPoint(_slr, [self enCaja:p])) { _sliding = YES; [self desliza:p]; }
+    if (!CGRectContainsPoint(self.bubble, p)) return;
+    _drag = YES;
+    _off = CGPointMake(p.x - _bx, p.y - _by);
 }
 
 - (void)touchesMoved:(NSSet *)_t withEvent:(UIEvent *)e {
+    if (!_drag) return;
     CGPoint p = [[_t anyObject] locationInView:self];
-    if (_drag) {
-        _bx = MAX(6, MIN(p.x - _off.x, self.bounds.size.width - 62));
-        _by = MAX(44, MIN(p.y - _off.y, self.bounds.size.height - 100));
-        _moved = YES;
-        [self setNeedsDisplay];
-        if (self.open) [self layoutBox];
-        return;
-    }
-    if (_sliding) { _moved = YES; [self desliza:p]; }
+    _bx = MAX(6, MIN(p.x - _off.x, self.bounds.size.width - 62));
+    _by = MAX(44, MIN(p.y - _off.y, self.bounds.size.height - 100));
+    _moved = YES;
+    [self setNeedsDisplay];
+    if (self.open) [self layoutBox];
 }
 
 - (void)touchesEnded:(NSSet *)_t withEvent:(UIEvent *)e {
-    CGPoint p = [[_t anyObject] locationInView:self];
-    if (_drag && !_moved) { [self setOpen:!self.open]; _drag = NO; return; }
+    if (_drag && _moved) { _drag = NO; return; }
     _drag = NO;
-    if (!_inBox || _moved || _sliding) return;
+    CGPoint p = [[_t anyObject] locationInView:self];
+    if (CGRectContainsPoint(self.bubble, p)) { [self setOpen:!self.open]; return; }
+    if (!self.open || !CGRectContainsPoint(_box.frame, p)) { [self setOpen:NO]; return; }
     [self tocaEn:[self enCaja:p]];
 }
 
@@ -347,10 +226,10 @@ static void VXUpload(NSString *path) {
     }
     if (CGRectContainsPoint(_btr[0], q)) { [self doPatch]; return; }
     if (CGRectContainsPoint(_btr[1], q)) { [self doReset]; return; }
+    if (CGRectContainsPoint(_slr, q)) { [self desliza:q]; }
 }
 
-- (void)desliza:(CGPoint)p {
-    CGPoint q = [self enCaja:p];
+- (void)desliza:(CGPoint)q {
     CGFloat t = (q.x - _slr.origin.x) / _slr.size.width;
     t = MAX(0, MIN(1, t));
     _fov.value = 40 + t * 260;
@@ -416,7 +295,7 @@ static void VXUpload(NSString *path) {
                 if ([fm removeItemAtPath:[d stringByAppendingPathComponent:h] error:nil]) borrados++;
             }
         }
-        VXSay([NSString stringWithFormat:@"reset: %d archivos\nreiniciando...", borrados]);
+        VXSay([NSString stringWithFormat:@"reset: %d\nreiniciando...", borrados]);
         [NSThread sleepForTimeInterval:1.5];
         dispatch_async(dispatch_get_main_queue(), ^{ exit(0); });
     });
@@ -464,7 +343,7 @@ static NSString *VXLoadPatch(void) {
         if (strstr(nm, "IFix.Core")) img = im;
         if (strstr(nm, "mscorlib")) msc = im;
     }
-    if (!img) return [NSString stringWithFormat:@"4 sin IFix.Core (de %zu)", n];
+    if (!img) return [NSString stringWithFormat:@"4 sin IFix (de %zu)", n];
     if (!msc) return @"5 sin mscorlib";
 
     void *cls = cf(img, "IFix.Core", "PatchManager");
@@ -541,64 +420,7 @@ static void VXInstall(void) {
     [l addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
 }
 
-#pragma mark - interpose
-
-#if VX_HIDE
-static uint32_t (*o_count)(void);
-static const char *(*o_name)(uint32_t);
-static int g_hide = -1;
-static int g_busy;
-
-static void VXOrig(void) {
-    if (!o_count) o_count = (void *)dlsym(RTLD_DEFAULT, "_dyld_image_count");
-    if (!o_name) o_name = (void *)dlsym(RTLD_DEFAULT, "_dyld_get_image_name");
-}
-
-static uint32_t vx_count(void) {
-    if (!o_count) VXOrig();
-    if (!o_count) return 0;
-    if (g_busy) return o_count();
-    g_busy = 1;
-    uint32_t n = o_count();
-    g_busy = 0;
-    return (g_hide >= 0 && n > 0) ? n - 1 : n;
-}
-
-static const char *vx_name(uint32_t i) {
-    VXOrig();
-    if (!o_name) return NULL;
-    if (g_hide < 0) return o_name(i);
-    uint32_t idx = ((int)i >= g_hide) ? i + 1 : i;
-    if (g_busy) return o_name(i);
-    g_busy = 1;
-    const char *r = o_name(idx);
-    g_busy = 0;
-    return r;
-}
-
-__attribute__((used, section("__DATA,__interpose")))
-static const void *vx_pairs[][2] = {
-    { (const void *)vx_count, (const void *)_dyld_image_count },
-    { (const void *)vx_name,  (const void *)_dyld_get_image_name },
-};
-
-static void VXHide(void) {
-    VXOrig();
-    if (!o_count || !o_name) return;
-    uint32_t n = o_count();
-    for (uint32_t i = 0; i < n; i++) {
-        const char *nm = o_name(i);
-        if (nm && (strstr(nm, "veex") || strstr(nm, "Vee.x"))) { g_hide = (int)i; break; }
-    }
-}
-#endif
-
 __attribute__((constructor)) static void VXInit(void) {
-#if VX_HIDE
-    VXHide();
-#endif
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(8 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{ VXInstall(); });
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(14 * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(), ^{ VXArmPatch(); });
 }
