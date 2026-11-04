@@ -271,7 +271,7 @@ static void VXUpload(NSString *path) {
     _btr[0] = CGRectMake(14, 234, 222, 32);
     _btr[1] = CGRectMake(14, 272, 222, 32);
     [self boton:@"SUBIR PARCHE" r:_btr[0]];
-    [self boton:@"RESET INVITADO" r:_btr[1]];
+    [self boton:@"RESET GUEST" r:_btr[1]];
 
     g_diag = [[UILabel alloc] initWithFrame:CGRectMake(10, 310, 230, 0)];
     g_diag.font = [UIFont systemFontOfSize:9];
@@ -294,6 +294,8 @@ static void VXUpload(NSString *path) {
 }
 
 - (CGRect)bubble { return CGRectMake(_bx, _by, 56, 56); }
+
+- (CGPoint)enCaja:(CGPoint)p { return [_box convertPoint:p fromView:self]; }
 
 - (BOOL)pointInside:(CGPoint)p withEvent:(UIEvent *)e {
     if (CGRectContainsPoint(self.bubble, p)) return YES;
@@ -325,7 +327,7 @@ static void VXUpload(NSString *path) {
         return;
     }
     _inBox = YES;
-    if (CGRectContainsPoint(_slr, p)) { _sliding = YES; [self desliza:p]; }
+    if (CGRectContainsPoint(_slr, [self enCaja:p])) { _sliding = YES; [self desliza:p]; }
 }
 
 - (void)touchesMoved:(NSSet *)_t withEvent:(UIEvent *)e {
@@ -346,23 +348,24 @@ static void VXUpload(NSString *path) {
     if (_drag && !_moved) { [self setOpen:!self.open]; _drag = NO; return; }
     _drag = NO;
     if (!_inBox || _moved || _sliding) return;
-    [self tocaEn:p];
+    [self tocaEn:[self enCaja:p]];
 }
 
-- (void)tocaEn:(CGPoint)p {
+- (void)tocaEn:(CGPoint)q {
     for (int i = 0; i < 4; i++) {
-        if (CGRectContainsPoint(_swr[i], p)) {
+        if (CGRectContainsPoint(_swr[i], q)) {
             _sw[i].on = !_sw[i].on;
             [self aplica:i];
             return;
         }
     }
-    if (CGRectContainsPoint(_btr[0], p)) { [self doPatch]; return; }
-    if (CGRectContainsPoint(_btr[1], p)) { [self doReset]; return; }
+    if (CGRectContainsPoint(_btr[0], q)) { [self doPatch]; return; }
+    if (CGRectContainsPoint(_btr[1], q)) { [self doReset]; return; }
 }
 
 - (void)desliza:(CGPoint)p {
-    CGFloat t = (p.x - _slr.origin.x) / _slr.size.width;
+    CGPoint q = [self enCaja:p];
+    CGFloat t = (q.x - _slr.origin.x) / _slr.size.width;
     t = MAX(0, MIN(1, t));
     _fov.value = 40 + t * 260;
     g.fov = _fov.value;
@@ -417,9 +420,30 @@ static void VXUpload(NSString *path) {
 }
 
 - (void)doReset {
-    NSDictionary *q = @{ (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword };
-    OSStatus st = SecItemDelete((__bridge CFDictionaryRef)q);
-    VXSay([NSString stringWithFormat:@"reset keychain: %d", (int)st]);
+    VXSay(@"reseteando...");
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSDictionary *q1 = @{ (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword };
+        SecItemDelete((__bridge CFDictionaryRef)q1);
+        NSDictionary *q2 = @{ (__bridge id)kSecClass: (__bridge id)kSecClassInternetPassword };
+        SecItemDelete((__bridge CFDictionaryRef)q2);
+
+        NSFileManager *fm = [NSFileManager defaultManager];
+        NSString *home = NSHomeDirectory();
+        NSArray *zonas = @[ @"Library/Preferences",
+                            @"Library/Caches/com.dts.freefireth",
+                            @"Library/Application Support" ];
+        int borrados = 0;
+        for (NSString *z in zonas) {
+            NSString *d = [home stringByAppendingPathComponent:z];
+            NSArray *hijos = [fm contentsOfDirectoryAtPath:d error:nil];
+            for (NSString *h in hijos) {
+                if ([fm removeItemAtPath:[d stringByAppendingPathComponent:h] error:nil]) borrados++;
+            }
+        }
+        VXSay([NSString stringWithFormat:@"reset: %d archivos\nreiniciando...", borrados]);
+        [NSThread sleepForTimeInterval:1.5];
+        dispatch_async(dispatch_get_main_queue(), ^{ exit(0); });
+    });
 }
 
 - (void)tick:(CADisplayLink *)l { if (g.esp && g_draw) [g_draw setNeedsDisplay]; }
