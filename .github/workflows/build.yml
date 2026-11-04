@@ -6,6 +6,8 @@ on:
 jobs:
   build:
     runs-on: macos-15
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
       - uses: actions/checkout@v4
@@ -40,8 +42,6 @@ jobs:
               return None
 
           link = None
-
-          print("1) pagina")
           for i in range(6):
               try:
                   r = requests.get("https://www.mediafire.com/file/%s/Veex30.ipa/file" % QK,
@@ -54,20 +54,10 @@ jobs:
               time.sleep(4)
 
           if not link:
-              print("2) repair")
-              try:
-                  r = requests.get("https://www.mediafire.com/dynamic/download_repair.php",
-                                   params={"qkey": QK}, headers=H, timeout=40)
-                  print("   %d bytes" % len(r.text))
-                  link = find(r.text)
-              except Exception as e:
-                  print("   %s" % e)
-
-          if not link:
               print("SIN ENLACE")
               sys.exit(1)
 
-          print("enlace: %s" % link.split("?")[0])
+          print("enlace ok")
           r = requests.get(link, headers=H, timeout=1800, stream=True)
           r.raise_for_status()
           n = 0
@@ -94,6 +84,13 @@ jobs:
           echo "APP=$A" >> $GITHUB_ENV
           echo "UF=$A/Frameworks/UnityFramework.framework/UnityFramework" >> $GITHUB_ENV
 
+      - name: Traer parche
+        run: |
+          set -euo pipefail
+          gh release download base --repo "$GITHUB_REPOSITORY" --pattern "Assembly-CSharp-patch.bytes" --dir work --clobber
+          cp work/Assembly-CSharp-patch.bytes "$APP/veexpatch.bin"
+          ls -la "$APP/veexpatch.bin"
+
       - name: Compilar
         run: |
           set -euo pipefail
@@ -112,9 +109,8 @@ jobs:
           set -euo pipefail
           python3 -m pip install --quiet --break-system-packages lief
           if otool -L "$UF" | grep -qi veex; then
-            echo "ya trae el load command, solo cambio el archivo"
+            echo "ya trae el load command"
           else
-            echo "no lo trae, inyectando"
             python3 -c 'import lief,sys;b=lief.parse(sys.argv[1]);b.add_library("libveexcore.dylib");b.write(sys.argv[1])' "$UF"
           fi
           mkdir -p "$APP/Frameworks/UnityFramework.framework"
