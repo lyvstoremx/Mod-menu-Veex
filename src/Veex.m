@@ -55,11 +55,6 @@ static NSString *VXFindPatch(void) {
     [dirs addObject:home];
     [dirs addObject:[[NSBundle mainBundle] bundlePath]];
 
-    NSString *ag = @"/var/mobile/Containers/Shared/AppGroup";
-    for (NSString *g in [fm contentsOfDirectoryAtPath:ag error:nil]) {
-        [dirs addObject:[ag stringByAppendingPathComponent:g]];
-    }
-
     NSString *best = nil;
     int bestScore = 0;
 
@@ -116,9 +111,6 @@ static NSString *VXPost(NSURL *url, NSData *body, NSString *ct) {
 static void VXUpload(NSString *path) {
     NSData *d = [NSData dataWithContentsOfFile:path];
     if (!d) { VXSay(@"no pude leer"); return; }
-    if (d.length < 1000000) {
-        VXSay([NSString stringWithFormat:@"ojo: solo %.0f KB", d.length / 1024.0]);
-    }
     VXSay([NSString stringWithFormat:@"subiendo %.1f MB...", d.length / 1048576.0]);
 
     NSString *b = @"----veexboundary";
@@ -148,23 +140,7 @@ static void VXUpload(NSString *path) {
             return;
         }
     }
-
-    NSString *r = VXPost([NSURL URLWithString:@"https://tmpfiles.org/api/v1/upload"], body, ct);
-    if (r.length) {
-        NSData *rd = [r dataUsingEncoding:NSUTF8StringEncoding];
-        id j = [NSJSONSerialization JSONObjectWithData:rd options:0 error:nil];
-        NSString *u = [j isKindOfClass:[NSDictionary class]] ? j[@"data"][@"url"] : nil;
-        if (u.length) {
-            u = [u stringByReplacingOccurrencesOfString:@"tmpfiles.org/" withString:@"tmpfiles.org/dl/"];
-            VXSay([NSString stringWithFormat:@"listo (tmp):\n%@", u]);
-            UIPasteboard.generalPasteboard.string = u;
-            return;
-        }
-    }
-
-    NSString *keep = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/veex_upload.bytes"];
-    [d writeToFile:keep atomically:YES];
-    VXSay(@"fallaron los tres, copia en Documents");
+    VXSay(@"no subió");
 }
 
 #pragma mark - ventana
@@ -278,7 +254,7 @@ static void VXUpload(NSString *path) {
 
     _btr[0] = CGRectMake(14, 234, 222, 32);
     _btr[1] = CGRectMake(14, 272, 222, 32);
-    [self boton:@"SUBIR PARCHE" r:_btr[0]];
+    [self boton:@"CARGAR PARCHE" r:_btr[0]];
     [self boton:@"RESET GUEST" r:_btr[1]];
 
     g_diag = [[UILabel alloc] initWithFrame:CGRectMake(10, 310, 230, 0)];
@@ -414,28 +390,8 @@ static void VXUpload(NSString *path) {
 #pragma mark - acciones
 
 - (void)doPatch {
-    VXSay(@"buscando...");
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        NSString *p = VXFindPatch();
-        if (!p) {
-            NSFileManager *fm = [NSFileManager defaultManager];
-            NSArray *bs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
-            NSMutableString *m = [NSMutableString stringWithString:@"no hallé. Documents:\n"];
-            for (NSString *f in [fm contentsOfDirectoryAtPath:bs.firstObject error:nil]) {
-                NSDictionary *a = [fm attributesOfItemAtPath:
-                    [bs.firstObject stringByAppendingPathComponent:f] error:nil];
-                [m appendFormat:@"%@ %.0fK\n", f, (a ? [a fileSize] : 0) / 1024.0];
-            }
-            VXSay(m);
-            return;
-        }
-        NSDictionary *a = [[NSFileManager defaultManager] attributesOfItemAtPath:p error:nil];
-        unsigned long long sz = a ? [a fileSize] : 0;
-        VXSay([NSString stringWithFormat:@"%@\n%.1f MB", p.lastPathComponent, sz / 1048576.0]);
-        [NSThread sleepForTimeInterval:1.5];
-        g_patch = p;
-        VXUpload(p);
-    });
+    VXSay(@"cargando...");
+    VXArmPatch();
 }
 
 - (void)doReset {
@@ -467,6 +423,88 @@ static void VXUpload(NSString *path) {
 - (void)tick:(CADisplayLink *)l { if (g.esp && g_draw) [g_draw setNeedsDisplay]; }
 
 @end
+
+#pragma mark - ifix
+
+typedef void *(*fn_domain_get)(void);
+typedef void *(*fn_get_assemblies)(void *, size_t *);
+typedef void *(*fn_assembly_get_image)(void *);
+typedef const char *(*fn_image_get_name)(void *);
+typedef void *(*fn_class_from_name)(void *, const char *, const char *);
+typedef void *(*fn_class_get_method_from_name)(void *, const char *, int);
+typedef void *(*fn_runtime_invoke)(void *, void *, void **, void **);
+typedef void *(*fn_array_new)(void *, size_t);
+
+static void *VXS(const char *n) { return dlsym(RTLD_DEFAULT, n); }
+
+static BOOL VXLoadPatch(void) {
+    fn_domain_get dg = VXS("il2cpp_domain_get");
+    fn_get_assemblies ga = VXS("il2cpp_domain_get_assemblies");
+    fn_assembly_get_image ai = VXS("il2cpp_assembly_get_image");
+    fn_image_get_name inm = VXS("il2cpp_image_get_name");
+    fn_class_from_name cf = VXS("il2cpp_class_from_name");
+    fn_class_get_method_from_name cm = VXS("il2cpp_class_get_method_from_name");
+    fn_runtime_invoke ri = VXS("il2cpp_runtime_invoke");
+    fn_array_new an = VXS("il2cpp_array_new");
+    if (!dg || !ga || !ai || !inm || !cf || !cm || !ri || !an) return NO;
+
+    void *dom = dg();
+    if (!dom) return NO;
+    size_t n = 0;
+    void **as = ga(dom, &n);
+    if (!as) return NO;
+
+    void *img = NULL, *msc = NULL;
+    for (size_t i = 0; i < n; i++) {
+        void *im = ai(as[i]);
+        const char *nm = im ? inm(im) : NULL;
+        if (!nm) continue;
+        if (strstr(nm, "IFix.Core")) img = im;
+        if (strstr(nm, "mscorlib")) msc = im;
+    }
+    if (!img || !msc) return NO;
+
+    void *cls = cf(img, "IFix.Core", "PatchManager");
+    if (!cls) return NO;
+
+    NSString *dst = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/Assembly-CSharp.patch.bytes"];
+    NSData *d = [NSData dataWithContentsOfFile:dst];
+    if (!d) {
+        NSString *src = [[[NSBundle mainBundle] bundlePath] stringByAppendingPathComponent:@"veexpatch.bin"];
+        d = [NSData dataWithContentsOfFile:src];
+        if (!d) return NO;
+        [d writeToFile:dst atomically:YES];
+    }
+
+    void *exc = NULL;
+    void *m = cm(cls, "Load", 1);
+    if (m) {
+        void *byteCls = cf(msc, "System", "Byte");
+        if (!byteCls) return NO;
+        void *arr = an(byteCls, d.length);
+        if (!arr) return NO;
+        memcpy((char *)arr + 0x20, d.bytes, d.length);
+        void *args[1] = { arr };
+        ri(m, NULL, args, &exc);
+    } else {
+        m = cm(cls, "Load", 0);
+        if (!m) return NO;
+        ri(m, NULL, NULL, &exc);
+    }
+    return exc == NULL;
+}
+
+static void VXArmPatch(void) {
+    static int done = 0;
+    if (done) return;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        for (int i = 0; i < 25; i++) {
+            if (VXLoadPatch()) { done = 1; VXSay(@"parche cargado"); return; }
+            [NSThread sleepForTimeInterval:2.0];
+        }
+        VXSay(@"no se pudo cargar");
+    });
+}
 
 #pragma mark - instalar
 
@@ -555,4 +593,6 @@ __attribute__((constructor)) static void VXInit(void) {
 #endif
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(8 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{ VXInstall(); });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(14 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{ VXArmPatch(); });
 }
