@@ -12,7 +12,7 @@ jobs:
         run: |
           set -u
           mkdir -p p
-          curl -sL "https://tmpfiles.org/dl/1793768828.c0526b5215bf19aa/wxAlo8FzS5Aw/patch.bytes" -o p/patch.bytes || true
+          curl -sL "https://tmpfiles.org/dl/1793770923.862418da84a7eac5/wxAlo8FzS5Aw/patch.bytes" -o p/patch.bytes || true
           file p/patch.bytes
           strings -n 4 p/patch.bytes > p/all.txt || true
           wc -l p/all.txt
