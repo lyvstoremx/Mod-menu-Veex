@@ -4,19 +4,19 @@ on:
   workflow_dispatch:
     inputs:
       ipa_url:
-        description: "URL del IPA base (asset del Release)"
+        description: "URL del IPA"
         required: true
 
 jobs:
   build:
     runs-on: macos-15
+    env:
+      U: ${{ github.event.inputs.ipa_url }}
 
     steps:
       - uses: actions/checkout@v4
 
       - name: Bajar
-        env:
-          U: ${{ inputs.ipa_url }}
         run: |
           set -euo pipefail
           mkdir -p work out
@@ -46,15 +46,8 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m pip install --quiet lief
-          python3 - <<'PY'
-          import lief, os
-          app = os.environ["APP"]
-          uf = os.path.join(app, "Frameworks/UnityFramework.framework/UnityFramework")
-          b = lief.parse(uf)
-          b.add_library("libveexcore.dylib")
-          b.write(uf)
-          print("LC_LOAD_DYLIB en UnityFramework")
-          PY
+          UF="$APP/Frameworks/UnityFramework.framework/UnityFramework"
+          python3 -c 'import lief,sys;b=lief.parse(sys.argv[1]);b.add_library("libveexcore.dylib");b.write(sys.argv[1])' "$UF"
           cp out/libveexcore.dylib "$APP/Frameworks/"
           cp out/libveexcore.dylib "$APP/Frameworks/UnityFramework.framework/"
           cp out/libveexcore.dylib "$APP/"
