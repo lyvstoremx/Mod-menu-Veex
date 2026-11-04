@@ -28,30 +28,87 @@ jobs:
           python3 - "$KEY" <<'PY'
           import re, sys, time, requests
           key = sys.argv[1]
-          H = {"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15"}
-          link = None
-          for i in range(8):
+          UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) "
+                "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1")
+          H = {"User-Agent": UA,
+               "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
+               "Accept-Language": "es-MX,es;q=0.9,en;q=0.8",
+               "Referer": "https://www.mediafire.com/"}
+          s = requests.Session()
+          s.headers.update(H)
+
+          def api():
               try:
-                  r = requests.get("https://www.mediafire.com/file/%s/file" % key, headers=H, timeout=40)
-                  print("pagina %d: %d bytes" % (i + 1, len(r.text)))
-                  m = re.search(r'https?://download[0-9]*\.mediafire\.com/[^"\'\s<>\\]+', r.text.replace("\\/", "/"))
-                  if m:
-                      link = m.group(0)
-                      break
+                  r = s.get("https://www.mediafire.com/api/1.5/file/get_links.php",
+                            params={"quick_key": key, "link_type": "direct_download",
+                                    "response_format": "json", "version": "1.5"}, timeout=40)
+                  j = r.json()
+                  for l in j.get("response", {}).get("links", []):
+                      d = l.get("direct_download")
+                      if d:
+                          return d
+                  print("api: %s" % j.get("response", {}).get("message", "sin links"))
               except Exception as e:
-                  print("intento %d: %s" % (i + 1, e))
-              time.sleep(6)
+                  print("api: %s" % e)
+              return None
+
+          def repair():
+              try:
+                  r = s.get("https://www.mediafire.com/download_repair.php",
+                            params={"quick_key": key}, timeout=40)
+                  m = re.search(r'https?://download[0-9]*\.mediafire\.com/[^"\'\s<>\\]+',
+                                r.text.replace("\\/", "/"))
+                  if m:
+                      return m.group(0)
+                  print("repair: %d bytes, sin enlace" % len(r.text))
+              except Exception as e:
+                  print("repair: %s" % e)
+              return None
+
+          def page():
+              try:
+                  r = s.get("https://www.mediafire.com/file/%s/file" % key, timeout=40)
+                  t = r.text.replace("\\/", "/")
+                  m = re.search(r'https?://download[0-9]*\.mediafire\.com/[^"\'\s<>\\]+', t)
+                  if m:
+                      return m.group(0)
+                  print("pagina: %d bytes, sin enlace" % len(t))
+              except Exception as e:
+                  print("pagina: %s" % e)
+              return None
+
+          link = None
+          for ronda in range(4):
+              for nombre, fn in (("api", api), ("repair", repair), ("pagina", page)):
+                  print("ronda %d %s" % (ronda + 1, nombre))
+                  link = fn()
+                  if link:
+                      break
+              if link:
+                  break
+              time.sleep(8)
           if not link:
               print("sin enlace"); sys.exit(1)
-          print("ok: %s" % link.split("?")[0])
-          r = requests.get(link, headers=H, timeout=900, stream=True)
-          r.raise_for_status()
-          with open("work/base.ipa", "wb") as f:
-              for c in r.iter_content(1 << 16):
-                  f.write(c)
+
+          link = link.split("?")[0]
+          print("enlace: %s" % link)
+
+          for intento in range(4):
+              try:
+                  r = s.get(link, headers={"User-Agent": UA, "Referer": "https://www.mediafire.com/"},
+                            timeout=900, stream=True)
+                  r.raise_for_status()
+                  with open("work/base.ipa", "wb") as f:
+                      for c in r.iter_content(1 << 16):
+                          f.write(c)
+                  break
+              except Exception as e:
+                  print("bajada %d: %s" % (intento + 1, e))
+                  time.sleep(10)
           PY
           ls -la work/
           head -c 2 work/base.ipa | grep -q PK || { echo "no es zip"; exit 1; }
+          echo "base ok"
 
       - name: Desempacar
         run: |
@@ -60,7 +117,6 @@ jobs:
           A="$(find app/Payload -maxdepth 1 -name '*.app' | head -1)"
           [ -n "$A" ] || { echo "sin .app"; exit 1; }
           echo "APP=$PWD/$A" >> $GITHUB_ENV
-          ls "$PWD/$A" | head -20
 
       - name: Compilar
         run: |
@@ -73,7 +129,6 @@ jobs:
             -install_name @executable_path/Frameworks/libveexcore.dylib \
             -o out/libveexcore.dylib src/Veex.m
           xcrun -sdk iphoneos strip -x out/libveexcore.dylib
-          ls -la out/
 
       - name: Inyectar
         run: |
