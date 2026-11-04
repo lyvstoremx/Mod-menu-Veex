@@ -2,16 +2,12 @@ name: Veex
 
 on:
   workflow_dispatch:
-    inputs:
-      ipa_url:
-        description: "URL del IPA"
-        required: true
 
 jobs:
   build:
     runs-on: macos-15
     env:
-      U: ${{ github.event.inputs.ipa_url }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
       - uses: actions/checkout@v4
@@ -20,13 +16,13 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p work out
-          curl -sSL -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" "$U" -o work/base.ipa
+          gh release download --repo "$GITHUB_REPOSITORY" --pattern "*.ipa" --dir work --clobber
           ls -la work/
 
       - name: Desempacar
         run: |
           set -euo pipefail
-          cd work && unzip -q base.ipa -d app
+          cd work && unzip -q base.ipa -d app 2>/dev/null || unzip -q *.ipa -d app
           echo "APP=$PWD/app/Payload/$(ls app/Payload)" >> $GITHUB_ENV
 
       - name: Compilar
