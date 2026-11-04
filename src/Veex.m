@@ -7,6 +7,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#if 0
 #pragma mark - dyld
 
 static uint32_t (*orig_count)(void);
@@ -54,6 +55,9 @@ static void VXHideSelf(void) {
         if (strstr(nm, "veex") || strstr(nm, "Vee.x")) { g_hideIdx = (int)i; break; }
     }
 }
+#else
+static void VXHideSelf(void) {}
+#endif
 
 #pragma mark - estado
 
