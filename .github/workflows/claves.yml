@@ -20,7 +20,7 @@ jobs:
           curl -sL -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" "$U" -o p/patch.bytes
           SZ=$(stat -f%z p/patch.bytes)
           echo "tamano: $SZ"
-          if [ "$SZ" -lt 1000000 ]; then echo "ARCHIVO CHICO, es HTML o basura"; file p/patch.bytes; exit 1; fi
+          if [ "$SZ" -lt 1000000 ]; then echo "CHICO, es HTML o basura"; file p/patch.bytes; exit 1; fi
           xxd -l 16 p/patch.bytes
           strings -n 4 p/patch.bytes > p/all.txt || true
           wc -l p/all.txt
