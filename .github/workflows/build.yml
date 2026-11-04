@@ -8,7 +8,7 @@ jobs:
     runs-on: macos-15
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      PAT: "*.ipa"
+      PAT: "1793704293799-khsdlj8khio-Free_Fire_1.132.1_1793704144.ipa"
 
     steps:
       - uses: actions/checkout@v4
@@ -17,15 +17,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p work out
-          echo "patron: $PAT"
           gh release download --repo "$GITHUB_REPOSITORY" --pattern "$PAT" --dir work --clobber
-          ls -la work/
-          N=$(ls work/*.ipa | wc -l | tr -d ' ')
-          echo "encontradas: $N"
-          if [ "$N" -ne 1 ]; then
-            echo "hay $N, me quedo con la mas nueva"
-            ls -t work/*.ipa | tail -n +2 | xargs -r rm -f
-          fi
           ls -la work/
 
       - name: Desempacar
@@ -53,7 +45,7 @@ jobs:
       - name: Inyectar
         run: |
           set -euo pipefail
-          python3 -m pip install --quiet lief
+          python3 -m pip install --quiet --break-system-packages lief
           UF="$APP/Frameworks/UnityFramework.framework/UnityFramework"
           python3 -c 'import lief,sys;b=lief.parse(sys.argv[1]);b.add_library("libveexcore.dylib");b.write(sys.argv[1])' "$UF"
           cp out/libveexcore.dylib "$APP/Frameworks/"
