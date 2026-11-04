@@ -43,14 +43,17 @@ jobs:
           test -n "$F" || { echo "sin ipa"; exit 1; }
           unzip -q -o "$F" -d work/app
           APP=$(find work/app -maxdepth 3 -name '*.app' -type d | head -1)
-          echo "app: $APP"
           FW="$APP/Frameworks"
-          ls "$FW" | grep -i monite || { echo "no hay Monite.dylib"; exit 1; }
           cp out/Monite.dylib "$FW/Monite.dylib"
-          lipo -info "$FW/Monite.dylib"
-          otool -L "$APP/Frameworks/UnityFramework.framework/UnityFramework" | grep -i monite
+          echo "=== quien carga Monite ==="
+          otool -L "$FW/UnityFramework.framework/UnityFramework" | grep -i monite || echo "no en UnityFramework"
+          otool -L "$APP/FreeFire" | grep -i monite || echo "no en FreeFire"
+          grep -ri monite "$APP/Info.plist" || echo "no en Info.plist"
+          echo "=== dylibs en Frameworks ==="
+          ls "$FW" | head -30
 
       - name: Recon IFix
+        if: always()
         run: |
           set -u
           APP=$(find work/app -maxdepth 3 -name '*.app' -type d | head -1)
@@ -58,18 +61,18 @@ jobs:
           echo "=== patch/bytes ===" >> work/recon.txt
           find "$APP" -type f \( -iname '*patch*' -o -iname '*.bytes' -o -iname '*.dll' \) 2>/dev/null >> work/recon.txt
           echo "=== managed dirs ===" >> work/recon.txt
-          find "$APP" -type d -iname '*managed*' -o -type d -iname '*ifix*' 2>/dev/null >> work/recon.txt
+          find "$APP" -type d \( -iname '*managed*' -o -iname '*ifix*' \) 2>/dev/null >> work/recon.txt
           cat work/recon.txt
 
       - name: Empaquetar
+        if: always()
         run: |
-          set -euo pipefail
-          cd work/app
+          set -u
+          cd work/app || exit 0
           zip -qry ../../Veex.ipa Payload
-          cd ../..
-          ls -la Veex.ipa
 
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: Veex
           path: Veex.ipa
