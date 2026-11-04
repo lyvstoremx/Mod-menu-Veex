@@ -100,3 +100,14 @@ jobs:
             ref/dist/
             ref/generated/
           retention-days: 7
+
+      - name: Publicar
+        if: success()
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ok = $true
+          try { gh release view base --repo "$env:GITHUB_REPOSITORY" | Out-Null } catch { $ok = $false }
+          if (-not $ok) { gh release create base --title base --repo "$env:GITHUB_REPOSITORY" }
+          gh release upload base ref\dist\Assembly-CSharp-patch.bytes --clobber --repo "$env:GITHUB_REPOSITORY"
