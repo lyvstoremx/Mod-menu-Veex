@@ -13,7 +13,6 @@ static const char *(*orig_name)(uint32_t);
 static int g_hideIdx = -1;
 static BOOL g_ready = NO;
 static int g_busy = 0;
-
 static void VXOrig(void) {
     if (g_ready || g_busy) return;
     g_busy = 1;
@@ -102,22 +101,32 @@ static void VXUpload(NSString *path) {
 
     NSString *b = @"----veexboundary";
     NSMutableData *d = [NSMutableData data];
-    [d appendData:[[NSString stringWithFormat:@"--%@\r\nContent-Disposition: form-data; name=\"reqtype\"\r\n\r\nfileupload\r\n", b] dataUsingEncoding:NSUTF8StringEncoding]];
-    [d appendData:[[NSString stringWithFormat:@"--%@\r\nContent-Disposition: form-data; name=\"fileToUpload\"; filename=\"patch.bytes\"\r\nContent-Type: application/octet-stream\r\n\r\n", b] dataUsingEncoding:NSUTF8StringEncoding]];
+    [d appendData:[[NSString stringWithFormat:@"--%@\r\nContent-Disposition: form-data; name=\"file\"; filename=\"patch.bytes\"\r\nContent-Type: application/octet-stream\r\n\r\n", b] dataUsingEncoding:NSUTF8StringEncoding]];
     [d appendData:body];
     [d appendData:[[NSString stringWithFormat:@"\r\n--%@--\r\n", b] dataUsingEncoding:NSUTF8StringEncoding]];
 
-    NSMutableURLRequest *r = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://catbox.moe/user/api.php"]];
+    NSMutableURLRequest *r = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://tmpfiles.org/api/v1/upload"]];
     r.HTTPMethod = @"POST";
     [r setValue:[NSString stringWithFormat:@"multipart/form-data; boundary=%@", b] forHTTPHeaderField:@"Content-Type"];
+    [r setValue:@"Mozilla/5.0 (iPhone)" forHTTPHeaderField:@"User-Agent"];
     r.HTTPBody = d;
     r.timeoutInterval = 180;
 
     [[NSURLSession.sharedSession dataTaskWithRequest:r completionHandler:^(NSData *rd, NSURLResponse *resp, NSError *err) {
         NSString *txt = rd ? [[NSString alloc] initWithData:rd encoding:NSUTF8StringEncoding] : nil;
-        txt = [txt stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-        if (txt.length && [txt hasPrefix:@"http"]) VXSay(txt);
-        else VXSay([NSString stringWithFormat:@"fallo %ld", (long)((NSHTTPURLResponse *)resp).statusCode]);
+        if (txt.length) {
+            NSRange k = [txt rangeOfString:@"https://tmpfiles.org/"];
+            if (k.location != NSNotFound) {
+                NSRange rest = NSMakeRange(k.location + k.length, txt.length - k.location - k.length);
+                NSRange end = [txt rangeOfCharacterFromSet:[NSCharacterSet characterSetWithCharactersInString:@"\"\\ "] options:0 range:rest];
+                NSUInteger len = end.location == NSNotFound ? rest.length : end.location - rest.location;
+                NSString *u = [txt substringWithRange:NSMakeRange(k.location, k.length + len)];
+                u = [u stringByReplacingOccurrencesOfString:@"tmpfiles.org/" withString:@"tmpfiles.org/dl/"];
+                VXSay(u);
+                return;
+            }
+        }
+        VXSay([NSString stringWithFormat:@"fallo %ld", (long)((NSHTTPURLResponse *)resp).statusCode]);
     }] resume];
 }
 
@@ -151,6 +160,7 @@ static int VXKeychainPurge(void) {
 @end
 @implementation VXDraw
 - (void)drawRect:(CGRect)r {
+    if (!g.esp) return;
     CGContextRef c = UIGraphicsGetCurrentContext();
     CGContextSetStrokeColorWithColor(c, [UIColor colorWithRed:0 green:1 blue:0.4 alpha:0.8].CGColor);
     CGContextSetLineWidth(c, 1.5);
@@ -158,8 +168,6 @@ static int VXKeychainPurge(void) {
     CGContextStrokeEllipseInRect(c, CGRectMake(m.x - g.fov, m.y - g.fov, g.fov * 2, g.fov * 2));
 }
 @end
-
-#pragma mark - panel
 
 @interface VeexPanel : UIView
 @property (nonatomic, strong) UIView *box;
@@ -260,10 +268,7 @@ static int VXKeychainPurge(void) {
     return CGRectContainsPoint(_bub.frame, p);
 }
 
-- (void)toggle {
-    _box.hidden = !_box.hidden;
-    [self clamp];
-}
+- (void)toggle { _box.hidden = !_box.hidden; [self clamp]; }
 
 - (void)drag:(UIPanGestureRecognizer *)p {
     CGPoint d = [p translationInView:self];
@@ -278,7 +283,7 @@ static int VXKeychainPurge(void) {
     _pos.y = MAX(40, MIN(_pos.y, h - 60));
     _bub.frame = CGRectMake(_pos.x, _pos.y, 46, 46);
     CGFloat bx = MIN(_pos.x, w - 258);
-    CGFloat by = _pos.y + 54 + 296 > h ? _pos.y - 302 : _pos.y + 54;
+    CGFloat by = (_pos.y + 54 + 296 > h) ? _pos.y - 302 : _pos.y + 54;
     _box.frame = CGRectMake(MAX(6, bx), MAX(40, by), 250, 296);
 }
 
@@ -288,6 +293,7 @@ static int VXKeychainPurge(void) {
     if (s.tag == 1) g.aim = on;
     if (s.tag == 2) g.fire = on;
     if (s.tag == 3) g.visOnly = on;
+    if (g_draw) [g_draw setNeedsDisplay];
 }
 
 - (void)reset { VXSay([NSString stringWithFormat:@"reset: %d", VXKeychainPurge()]); }
@@ -300,7 +306,7 @@ static int VXKeychainPurge(void) {
     });
 }
 
-- (void)tick:(CADisplayLink *)l { if (g_draw) [g_draw setNeedsDisplay]; }
+- (void)tick:(CADisplayLink *)l { if (g.esp && g_draw) [g_draw setNeedsDisplay]; }
 
 @end
 
@@ -309,7 +315,11 @@ static void VXBuildMenu(void) {
     g_win = [[UIWindow alloc] initWithFrame:s];
     g_win.windowLevel = UIWindowLevelAlert + 10;
     g_win.backgroundColor = UIColor.clearColor;
-    g_win.rootViewController = [UIViewController new];
+
+    UIViewController *vc = [UIViewController new];
+    vc.view.backgroundColor = UIColor.clearColor;
+    vc.view.userInteractionEnabled = NO;
+    g_win.rootViewController = vc;
     g_win.hidden = NO;
 
     VXDraw *d = [[VXDraw alloc] initWithFrame:s];
