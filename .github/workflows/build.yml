@@ -18,29 +18,85 @@ jobs:
           python3 - <<'PY'
           import re, sys, time, requests
 
-          URL = "https://www.mediafire.com/file/od7voveps5u10c1/file"
-          H = {"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
-                             "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"}
-          PAT = r'https?://download[0-9]*\.mediafire\.com/[^"\'\s<>\\]+'
+          QK = "od7voveps5u10c1"
+          DK = "4o62ssbfdpf"
+          H = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                             "(KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+               "Accept": "text/html,application/xhtml+xml,*/*",
+               "Referer": "https://www.mediafire.com/"}
+
+          PATS = [
+              r'https?://download[0-9]*\.mediafire\.com/[^"\'\s<>\\]+',
+              r'//download[0-9]*\.mediafire\.com/[^"\'\s<>\\]+',
+              r'https?://[a-z0-9.]*mediafire\.com/[^"\'\s<>\\]*\.ipa[^"\'\s<>\\]*',
+          ]
+
+          def find(html):
+              h = html.replace("\\/", "/").replace("&amp;", "&")
+              for p in PATS:
+                  m = re.search(p, h)
+                  if m:
+                      u = m.group(0)
+                      return u if u.startswith("http") else "https:" + u
+              return None
 
           link = None
-          for i in range(8):
+
+          print("1) repair")
+          for i in range(3):
               try:
-                  r = requests.get(URL, headers=H, timeout=40)
-                  print("pagina %d: %d bytes" % (i + 1, len(r.text)))
-                  m = re.search(PAT, r.text.replace("\\/", "/"))
-                  if m:
-                      link = m.group(0); break
+                  r = requests.get("https://www.mediafire.com/dynamic/download_repair.php",
+                                   params={"qkey": QK, "dkey": DK}, headers=H, timeout=40)
+                  print("   %d bytes" % len(r.text))
+                  link = find(r.text)
+                  if link: break
               except Exception as e:
-                  print("intento %d: %s" % (i + 1, e))
-              time.sleep(5)
+                  print("   %s" % e)
+              time.sleep(4)
+
           if not link:
-              print("sin enlace"); sys.exit(1)
-          print("ok")
-          r = requests.get(link, headers=H, timeout=900, stream=True)
+              print("2) pagina")
+              for i in range(5):
+                  try:
+                      r = requests.get("https://www.mediafire.com/file/%s/file" % QK,
+                                       headers=H, timeout=40)
+                      print("   %d bytes" % len(r.text))
+                      link = find(r.text)
+                      if link: break
+                  except Exception as e:
+                      print("   %s" % e)
+                  time.sleep(4)
+
+          if not link:
+              print("3) api")
+              try:
+                  r = requests.get("https://www.mediafire.com/api/1.5/file/get_links.php",
+                                   params={"quick_key": QK, "link_type": "direct_download",
+                                           "response_format": "json"}, headers=H, timeout=40)
+                  print("   %s" % r.text[:300])
+                  j = r.json()
+                  link = j["response"]["links"][0]["direct_download"]
+              except Exception as e:
+                  print("   %s" % e)
+
+          if not link:
+              print("SIN ENLACE")
+              sys.exit(1)
+
+          print("enlace: %s" % link.split("?")[0])
+          r = requests.get(link, headers=H, timeout=1200, stream=True)
           r.raise_for_status()
+          n = 0
           with open("work/base.ipa", "wb") as f:
-              for c in r.iter_content(1 << 16): f.write(c)
+              for c in r.iter_content(1 << 16):
+                  f.write(c); n += len(c)
+          print("bajado: %d bytes" % n)
+          if n < 300_000_000:
+              print("MUY CHICO"); sys.exit(1)
+          with open("work/base.ipa", "rb") as f:
+              if f.read(2) != b"PK":
+                  print("NO ES UN ZIP"); sys.exit(1)
+          print("ok")
           PY
           ls -la work/
 
@@ -71,7 +127,6 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m pip install --quiet --break-system-packages lief
-          cp "$UF" /tmp/uf.bak
           python3 -c 'import lief,sys;b=lief.parse(sys.argv[1]);b.add_library("libveexcore.dylib");b.write(sys.argv[1])' "$UF"
           cp out/libveexcore.dylib "$APP/Frameworks/"
           cp out/libveexcore.dylib "$APP/Frameworks/UnityFramework.framework/"
