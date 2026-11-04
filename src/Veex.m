@@ -36,12 +36,12 @@ static BOOL VXIsPatch(NSString *p) {
     NSDictionary *a = [fm attributesOfItemAtPath:p error:nil];
     if (!a) return NO;
     unsigned long long sz = [a fileSize];
-    if (sz < 20000 || sz > 80000000) return NO;
+    if (sz < 5000 || sz > 80000000) return NO;
     NSString *n = p.lastPathComponent.lowercaseString;
     if ([n containsString:@"assembly-csharp"] || [n containsString:@"remote_patch"] ||
-        [n containsString:@"patch"]) return YES;
+        [n containsString:@"patch"] || [n containsString:@"ifix"]) return YES;
     NSString *h = VXHead(p);
-    return h && [h hasPrefix:@"IFix"];
+    return h && ([h hasPrefix:@"IFix"] || [h hasPrefix:@"MZ"]);
 }
 
 static NSString *VXFindPatch(void) {
@@ -53,6 +53,12 @@ static NSString *VXFindPatch(void) {
     [dirs addObject:[home stringByAppendingPathComponent:@"Library/Caches"]];
     [dirs addObject:[home stringByAppendingPathComponent:@"Library/Application Support"]];
     [dirs addObject:home];
+    [dirs addObject:[[NSBundle mainBundle] bundlePath]];
+
+    NSString *ag = @"/var/mobile/Containers/Shared/AppGroup";
+    for (NSString *g in [fm contentsOfDirectoryAtPath:ag error:nil]) {
+        [dirs addObject:[ag stringByAppendingPathComponent:g]];
+    }
 
     NSString *best = nil;
     int bestScore = 0;
@@ -61,7 +67,8 @@ static NSString *VXFindPatch(void) {
         NSDirectoryEnumerator *e = [fm enumeratorAtPath:d];
         for (NSString *f in e) {
             NSString *n = f.lastPathComponent.lowercaseString;
-            if ([n hasSuffix:@".png"] || [n hasSuffix:@".jpg"] || [n hasSuffix:@".meta"]) continue;
+            if ([n hasSuffix:@".png"] || [n hasSuffix:@".jpg"] || [n hasSuffix:@".meta"] ||
+                [n hasSuffix:@".car"]) continue;
             NSString *full = [d stringByAppendingPathComponent:f];
             if (!VXIsPatch(full)) continue;
 
@@ -69,6 +76,7 @@ static NSString *VXFindPatch(void) {
             if ([n containsString:@"assembly-csharp"]) score = 100;
             else if ([n containsString:@"remote_patch"]) score = 90;
             else if ([n containsString:@"patch"]) score = 80;
+            else if ([n containsString:@"ifix"]) score = 70;
 
             NSDictionary *a = [fm attributesOfItemAtPath:full error:nil];
             unsigned long long sz = a ? [a fileSize] : 0;
@@ -409,10 +417,21 @@ static void VXUpload(NSString *path) {
     VXSay(@"buscando...");
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         NSString *p = VXFindPatch();
-        if (!p) { VXSay(@"no encontré parche"); return; }
+        if (!p) {
+            NSFileManager *fm = [NSFileManager defaultManager];
+            NSArray *bs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
+            NSMutableString *m = [NSMutableString stringWithString:@"no hallé. Documents:\n"];
+            for (NSString *f in [fm contentsOfDirectoryAtPath:bs.firstObject error:nil]) {
+                NSDictionary *a = [fm attributesOfItemAtPath:
+                    [bs.firstObject stringByAppendingPathComponent:f] error:nil];
+                [m appendFormat:@"%@ %.0fK\n", f, (a ? [a fileSize] : 0) / 1024.0];
+            }
+            VXSay(m);
+            return;
+        }
         NSDictionary *a = [[NSFileManager defaultManager] attributesOfItemAtPath:p error:nil];
         unsigned long long sz = a ? [a fileSize] : 0;
-        VXSay([NSString stringWithFormat:@"%@\n%.1f MB\nsúbelo ya", p.lastPathComponent, sz / 1048576.0]);
+        VXSay([NSString stringWithFormat:@"%@\n%.1f MB", p.lastPathComponent, sz / 1048576.0]);
         [NSThread sleepForTimeInterval:1.5];
         g_patch = p;
         VXUpload(p);
@@ -435,8 +454,7 @@ static void VXUpload(NSString *path) {
         int borrados = 0;
         for (NSString *z in zonas) {
             NSString *d = [home stringByAppendingPathComponent:z];
-            NSArray *hijos = [fm contentsOfDirectoryAtPath:d error:nil];
-            for (NSString *h in hijos) {
+            for (NSString *h in [fm contentsOfDirectoryAtPath:d error:nil]) {
                 if ([fm removeItemAtPath:[d stringByAppendingPathComponent:h] error:nil]) borrados++;
             }
         }
@@ -493,13 +511,13 @@ static void VXOrig(void) {
 }
 
 static uint32_t vx_count(void) {
-    VXOrig();
+    if (!o_count) VXOrig();
     if (!o_count) return 0;
     if (g_busy) return o_count();
     g_busy = 1;
     uint32_t n = o_count();
     g_busy = 0;
-    return n > 0 ? n - 1 : 0;
+    return (g_hide >= 0 && n > 0) ? n - 1 : n;
 }
 
 static const char *vx_name(uint32_t i) {
