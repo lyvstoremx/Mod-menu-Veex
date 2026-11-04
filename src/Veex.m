@@ -350,12 +350,12 @@ static NSString *VXLoadPatch(void) {
     void *cls = cf(img, "IFix.Core", "PatchManager");
     if (!cls) return @"6 sin PatchManager";
 
-    void *m = cm(cls, "Load", 1);
+    void *m = cm(cls, "OptimizeLoad", 2);
+    if (!m) m = cm(cls, "Load", 1);
     if (!m) m = cm(cls, "Load", 0);
-    if (!m) m = cm(cls, "Load", 2);
 
     if (!m) {
-        if (!gm || !mn || !pc) return @"9 sin Load";
+        if (!gm || !mn || !pc) return @"9 sin metodo";
         NSMutableString *s = [NSMutableString stringWithString:@"m:"];
         void *it = NULL, *mm;
         int k = 0;
@@ -382,17 +382,10 @@ static NSString *VXLoadPatch(void) {
     if (!arr) return @"10 sin arreglo";
     memcpy((char *)arr + 0x20, d.bytes, d.length);
 
-    uint32_t np = pc ? pc(m) : 1;
+    int zero = 0;
     void *exc = NULL;
-    if (np >= 2) {
-        void *args[2] = { arr, NULL };
-        ri(m, NULL, args, &exc);
-    } else if (np == 1) {
-        void *args[1] = { arr };
-        ri(m, NULL, args, &exc);
-    } else {
-        ri(m, NULL, NULL, &exc);
-    }
+    void *args[2] = { arr, &zero };
+    ri(m, NULL, args, &exc);
     return exc ? @"11 excepcion" : @"ok";
 }
 
