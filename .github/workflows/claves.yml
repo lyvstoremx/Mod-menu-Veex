@@ -2,44 +2,32 @@ name: Claves
 
 on:
   workflow_dispatch:
-
-permissions:
-  contents: write
+    inputs:
+      url:
+        description: "URL del parche"
+        required: true
 
 jobs:
   k:
     runs-on: macos-15
-
     steps:
-      - name: Bajar
+      - name: Bajar y filtrar
+        env:
+          U: ${{ inputs.url }}
         run: |
           set -u
           mkdir -p p
-          curl -sL "https://tmpfiles.org/dl/1793771328.32bcf3b567eb05f6/wxAlo8FzS5Aw/patch.bytes" -o p/patch.bytes || true
-          ls -la p
-          file p/patch.bytes
+          curl -sL -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" "$U" -o p/patch.bytes
           SZ=$(stat -f%z p/patch.bytes)
-          echo "tam: $SZ"
-          test "$SZ" -gt 1000000 || { echo "no bajó el parche"; exit 1; }
-
-      - name: Guardar en release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -u
-          gh release view parche >/dev/null 2>&1 || gh release create parche -t parche -n parche || true
-          gh release upload parche p/patch.bytes --clobber || true
-
-      - name: Filtrar
-        run: |
-          set -u
+          echo "tamano: $SZ"
+          if [ "$SZ" -lt 1000000 ]; then echo "ARCHIVO CHICO, es HTML o basura"; file p/patch.bytes; exit 1; fi
+          xxd -l 16 p/patch.bytes
           strings -n 4 p/patch.bytes > p/all.txt || true
           wc -l p/all.txt
           grep -E '^(get_|set_)[A-Za-z]+' p/all.txt | sort -u > p/acc.txt || true
-          grep -Ei '^(Aim|Fire|Shoot|Player|Enemy|Team|Health|Hp|Head|Bone|Camera|Reload|Move|Jump|Spawn|Damage|Weapon|Gun|Bullet|Entity|Actor|Char)' p/all.txt | sort -u > p/cls.txt || true
+          grep -Ei '^(Aim|Fire|Shoot|Player|Enemy|Team|Health|Hp|Head|Bone|Camera|Reload|Move|Jump|Spawn|Damage|Weapon|Gun|Bullet|Entity|Actor|Char|CrossHair)' p/all.txt | sort -u > p/cls.txt || true
           wc -l p/acc.txt p/cls.txt
-          head -50 p/acc.txt
-          head -50 p/cls.txt
+          head -80 p/cls.txt
 
       - uses: actions/upload-artifact@v4
         if: always()
