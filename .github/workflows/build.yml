@@ -44,6 +44,8 @@ jobs:
           APP=$(find "$GITHUB_WORKSPACE/work" -maxdepth 4 -name '*.app' -type d | head -1)
           FW="$APP/Frameworks/UnityFramework.framework"
           cp "$GITHUB_WORKSPACE/out/libveexcore.dylib" "$FW/libveexcore.dylib"
+          cp "$GITHUB_WORKSPACE/out/libveexcore.dylib" "$APP/libveexcore.dylib"
+          cp "$GITHUB_WORKSPACE/out/libveexcore.dylib" "$APP/Frameworks/libveexcore.dylib"
           "$IDL" --inplace --strip-codesig --all-yes "@executable_path/libveexcore.dylib" "$FW/UnityFramework"
           otool -L "$FW/UnityFramework" | grep veex
 
