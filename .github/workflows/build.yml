@@ -1,53 +1,108 @@
-- name: Obtener base
+name: Veex
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "URL directa del IPA (opcional)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Base
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p work
+          U="${{ github.event.inputs.base_url }}"
+          if [ -n "$U" ]; then
+            echo "desde url"
+            curl -sSL --retry 3 -o work/base.ipa "$U"
+          else
+            echo "desde release"
+            gh release download base -p 'Veex54.ipa' -D work
+            mv work/Veex54.ipa work/base.ipa
+          fi
+          ls -la work/base.ipa
+          [ "$(head -c 2 work/base.ipa)" = "PK" ] || { echo "base invalida"; exit 1; }
+
+      - name: Dependencias
+        run: python3 -m pip install --quiet --break-system-packages lief
+
+      - name: Desempacar
+        run: |
+          set -euo pipefail
+          cd work && unzip -q base.ipa -d app
+          A="$(find app/Payload -maxdepth 1 -name '*.app' | head -1)"
+          [ -n "$A" ] || { echo "sin .app"; exit 1; }
+          echo "APP=$PWD/$A" >> $GITHUB_ENV
+
+      - name: Compilar
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          xcrun -sdk iphoneos clang -arch arm64 -dynamiclib \
+            -isysroot "$(xcrun --sdk iphoneos --show-sdk-path)" \
+            -miphoneos-version-min=15.0 -framework Foundation \
+            -framework UIKit -framework QuartzCore -framework Security \
+            -install_name @executable_path/Frameworks/libveexcore.dylib \
+            -o out/libveexcore.dylib src/Veex.m
+          xcrun -sdk iphoneos strip -x out/libveexcore.dylib
+
+      - name: Inyectar
+        run: |
+          set -euo pipefail
+          EXE="$APP/$(basename "$APP" .app)"
+          rm -f "$APP/Frameworks/libveexcore.dylib"
+          python3 -c "
+          import lief,sys
+          b=lief.parse(sys.argv[1])
+          if 'libveexcore.dylib' in [x.name for x in b.libraries]:
+              print('ya tenia dylib')
+          else:
+              b.add_library('libveexcore.dylib')
+              b.write(sys.argv[1])
+              print('inyectado')
+          " "$EXE"
+          mkdir -p "$APP/Frameworks"
+          cp out/libveexcore.dylib "$APP/Frameworks/"
+          chmod +x "$APP/Frameworks/libveexcore.dylib"
+
+      - name: Parche
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -uo pipefail
-          mkdir -p work
-          URL="${{ github.event.inputs.base_url }}"
-          if [ -n "$URL" ]; then
-            echo "desde url"
-            curl -sSL --retry 3 -o work/base.ipa "$URL"
+          gh release download base -p 'Assembly-CSharp-patch.bytes' -D work 2>/dev/null || true
+          if [ -f work/Assembly-CSharp-patch.bytes ]; then
+            cp work/Assembly-CSharp-patch.bytes "$APP/"
           fi
-          if [ ! -s work/base.ipa ]; then
-            echo "desde release (Veex54)"
-            gh release download base -p 'Veex54.ipa' -D work 2>/dev/null || true
-            [ -f work/Veex54.ipa ] && mv work/Veex54.ipa work/base.ipa
-          fi
-          if [ ! -s work/base.ipa ]; then
-            echo "desde release (cualquier ipa que no sea la salida)"
-            gh release download base -p '*.ipa' -D work 2>/dev/null || true
-            B="$(find work -maxdepth 1 -name '*.ipa' ! -name 'Veex.ipa' | head -1)"
-            [ -n "$B" ] && mv "$B" work/base.ipa
-          fi
-          if [ ! -s work/base.ipa ]; then
-            echo "desde mediafire"
-            KEY="${{ github.event.inputs.ipa_key }}"
-            python3 - "$KEY" <<'PY'
-          import re, sys, requests
-          key = sys.argv[1]
-          UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) "
-                "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1")
-          s = requests.Session()
-          s.headers.update({"User-Agent": UA, "Referer": "https://www.mediafire.com/"})
-          for c in ["https://www.mediafire.com/download/%s/Veex30.ipa" % key,
-                    "https://www.mediafire.com/download_repair.php?quick_key=%s" % key,
-                    "https://www.mediafire.com/file/%s/file" % key]:
-              try:
-                  r = s.get(c, timeout=40)
-                  m = re.search(r'https?://download[0-9]*\.mediafire\.com/[^"\'\s<>\\]+',
-                                r.text.replace("\\/", "/"))
-                  if m:
-                      d = s.get(m.group(0), stream=True, timeout=900)
-                      d.raise_for_status()
-                      with open("work/base.ipa", "wb") as f:
-                          for x in d.iter_content(1 << 16):
-                              f.write(x)
-                      break
-              except Exception as e:
-                  print("%s -> %s" % (c, e))
-          PY
-          fi
-          ls -la work/
-          head -c 2 work/base.ipa | grep -q PK || { echo "base invalida"; exit 1; }
-          echo "base ok"
+
+      - name: Firmar
+        run: |
+          set -euo pipefail
+          rm -rf "$APP/_CodeSignature"
+          printf '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0">\n<dict>\n<key>get-task-allow</key><true/>\n<key>application-identifier</key><string>com.dts.freefireth</string>\n</dict>\n</plist>\n' > work/ent.plist
+          find "$APP" -name '*.dylib' -exec codesign --force --sign - {} \;
+          codesign --force --sign - --entitlements work/ent.plist "$APP"
+
+      - name: Empaquetar
+        run: |
+          set -euo pipefail
+          cd work/app && zip -qry ../../Veex.ipa Payload
+          cd ../..
+          ls -la Veex.ipa
+
+      - name: Publicar
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload base Veex.ipa --clobber
