@@ -85,9 +85,11 @@ static NSString *VXPost(NSURL *url, NSData *body, NSString *ct) {
     NSMutableURLRequest *r = [NSMutableURLRequest requestWithURL:url];
     r.HTTPMethod = @"POST";
     [r setValue:ct forHTTPHeaderField:@"Content-Type"];
-    [r setValue:@"veex/1.0" forHTTPHeaderField:@"User-Agent"];
+    [r setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15"
+        forHTTPHeaderField:@"User-Agent"];
+    [r setValue:@"https://catbox.moe/" forHTTPHeaderField:@"Referer"];
     r.HTTPBody = body;
-    r.timeoutInterval = 120;
+    r.timeoutInterval = 180;
 
     __block NSString *out = nil;
     dispatch_semaphore_t sem = dispatch_semaphore_create(0);
@@ -96,7 +98,7 @@ static NSString *VXPost(NSURL *url, NSData *body, NSString *ct) {
             if (d) out = [[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding];
             dispatch_semaphore_signal(sem);
         }] resume];
-    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 130 * NSEC_PER_SEC));
+    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, 190 * NSEC_PER_SEC));
     return out;
 }
 
@@ -104,51 +106,54 @@ static void VXUpload(NSString *path) {
     NSData *d = [NSData dataWithContentsOfFile:path];
     if (!d) { VXSay(@"no pude leer"); return; }
     if (d.length < 1000000) {
-        VXSay([NSString stringWithFormat:@"chico: %.0f KB, seguro no es", d.length / 1024.0]);
+        VXSay([NSString stringWithFormat:@"ojo: solo %.0f KB", d.length / 1024.0]);
     }
     VXSay([NSString stringWithFormat:@"subiendo %.1f MB...", d.length / 1048576.0]);
 
     NSString *b = @"----veexboundary";
     NSMutableData *body = [NSMutableData data];
     [body appendData:[[NSString stringWithFormat:
-        @"--%@\r\nContent-Disposition: form-data; name=\"file\"; filename=\"%@\"\r\n"
-        @"Content-Type: application/octet-stream\r\n\r\n",
-        b, path.lastPathComponent] dataUsingEncoding:NSUTF8StringEncoding]];
+        @"--%@\r\nContent-Disposition: form-data; name=\"reqtype\"\r\n\r\nfileupload\r\n", b]
+        dataUsingEncoding:NSUTF8StringEncoding]];
+    [body appendData:[[NSString stringWithFormat:
+        @"--%@\r\nContent-Disposition: form-data; name=\"time\"\r\n\r\n72h\r\n", b]
+        dataUsingEncoding:NSUTF8StringEncoding]];
+    [body appendData:[[NSString stringWithFormat:
+        @"--%@\r\nContent-Disposition: form-data; name=\"fileToUpload\"; filename=\"%@\"\r\n"
+        @"Content-Type: application/octet-stream\r\n\r\n", b, path.lastPathComponent]
+        dataUsingEncoding:NSUTF8StringEncoding]];
     [body appendData:d];
     [body appendData:[[NSString stringWithFormat:@"\r\n--%@--\r\n", b] dataUsingEncoding:NSUTF8StringEncoding]];
 
     NSString *ct = [NSString stringWithFormat:@"multipart/form-data; boundary=%@", b];
-    NSString *res = VXPost([NSURL URLWithString:@"https://tmpfiles.org/api/v1/upload"], body, ct);
 
-    NSString *url = nil;
-    if (res.length) {
-        NSData *rd = [res dataUsingEncoding:NSUTF8StringEncoding];
+    for (NSString *s in @[ @"https://catbox.moe/user/api.php",
+                           @"https://litterbox.catbox.moe/resources/internals/api.php" ]) {
+        NSString *r = VXPost([NSURL URLWithString:s], body, ct);
+        r = [r stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+        if (r.length > 10 && [r hasPrefix:@"http"]) {
+            VXSay([NSString stringWithFormat:@"listo:\n%@", r]);
+            UIPasteboard.generalPasteboard.string = r;
+            return;
+        }
+    }
+
+    NSString *r = VXPost([NSURL URLWithString:@"https://tmpfiles.org/api/v1/upload"], body, ct);
+    if (r.length) {
+        NSData *rd = [r dataUsingEncoding:NSUTF8StringEncoding];
         id j = [NSJSONSerialization JSONObjectWithData:rd options:0 error:nil];
-        if ([j isKindOfClass:[NSDictionary class]]) url = j[@"data"][@"url"];
-    }
-    if (url.length) {
-        url = [url stringByReplacingOccurrencesOfString:@"tmpfiles.org/" withString:@"tmpfiles.org/dl/"];
-        VXSay([NSString stringWithFormat:@"listo:\n%@", url]);
-        UIPasteboard.generalPasteboard.string = url;
-        return;
+        NSString *u = [j isKindOfClass:[NSDictionary class]] ? j[@"data"][@"url"] : nil;
+        if (u.length) {
+            u = [u stringByReplacingOccurrencesOfString:@"tmpfiles.org/" withString:@"tmpfiles.org/dl/"];
+            VXSay([NSString stringWithFormat:@"listo (tmp):\n%@", u]);
+            UIPasteboard.generalPasteboard.string = u;
+            return;
+        }
     }
 
-    NSMutableData *cb = [NSMutableData data];
-    NSString *cb2 = @"----veex2";
-    [cb appendData:[[NSString stringWithFormat:@"--%@\r\nContent-Disposition: form-data; name=\"reqtype\"\r\n\r\nfileupload\r\n", cb2] dataUsingEncoding:NSUTF8StringEncoding]];
-    [cb appendData:[[NSString stringWithFormat:@"--%@\r\nContent-Disposition: form-data; name=\"fileToUpload\"; filename=\"%@\"\r\n\r\n", cb2, path.lastPathComponent] dataUsingEncoding:NSUTF8StringEncoding]];
-    [cb appendData:d];
-    [cb appendData:[[NSString stringWithFormat:@"\r\n--%@--\r\n", cb2] dataUsingEncoding:NSUTF8StringEncoding]];
-
-    NSString *r2 = VXPost([NSURL URLWithString:@"https://catbox.moe/user/api.php"], cb,
-                          [NSString stringWithFormat:@"multipart/form-data; boundary=%@", cb2]);
-    r2 = [r2 stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-    if (r2.length > 10 && [r2 hasPrefix:@"http"]) {
-        VXSay([NSString stringWithFormat:@"listo (catbox):\n%@", r2]);
-        UIPasteboard.generalPasteboard.string = r2;
-    } else {
-        VXSay(@"fallaron los dos servicios");
-    }
+    NSString *keep = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/veex_upload.bytes"];
+    [d writeToFile:keep atomically:YES];
+    VXSay(@"fallaron los tres, copia en Documents");
 }
 
 #pragma mark - ventana
@@ -186,6 +191,7 @@ static void VXUpload(NSString *path) {
 
 @interface VeexPanel : UIView
 @property (nonatomic, assign) BOOL open;
+- (void)tick:(CADisplayLink *)l;
 @end
 
 @implementation VeexPanel {
@@ -250,7 +256,6 @@ static void VXUpload(NSString *path) {
     g_diag.textColor = UIColor.yellowColor;
     g_diag.numberOfLines = 0;
     [_box addSubview:g_diag];
-    _box.frame = CGRectMake(0, 0, 250, 306);
 }
 
 - (void)row:(NSString *)txt y:(CGFloat)y on:(BOOL)on act:(SEL)act {
@@ -263,7 +268,6 @@ static void VXUpload(NSString *path) {
     UISwitch *s = [[UISwitch alloc] initWithFrame:CGRectMake(184, y, 51, 31)];
     s.on = on;
     s.transform = CGAffineTransformMakeScale(0.78, 0.78);
-    s.tag = y;
     [s addTarget:self action:act forControlEvents:UIControlEventValueChanged];
     [_box addSubview:s];
 }
@@ -312,10 +316,8 @@ static void VXUpload(NSString *path) {
 - (void)touchesMoved:(NSSet *)touches withEvent:(UIEvent *)e {
     if (!_drag) return;
     CGPoint p = [[touches anyObject] locationInView:self];
-    _bx = p.x - _off.x;
-    _by = p.y - _off.y;
-    _bx = MAX(6, MIN(_bx, self.bounds.size.width - 62));
-    _by = MAX(44, MIN(_by, self.bounds.size.height - 100));
+    _bx = MAX(6, MIN(p.x - _off.x, self.bounds.size.width - 62));
+    _by = MAX(44, MIN(p.y - _off.y, self.bounds.size.height - 100));
     _moved = YES;
     [self setNeedsDisplay];
     if (self.open) [self layoutBox];
@@ -381,6 +383,8 @@ static void VXUpload(NSString *path) {
     VXSay([NSString stringWithFormat:@"reset keychain: %d", (int)st]);
 }
 
+- (void)tick:(CADisplayLink *)l { if (g.esp && g_draw) [g_draw setNeedsDisplay]; }
+
 @end
 
 #pragma mark - instalar
@@ -411,14 +415,6 @@ static void VXInstall(void) {
     CADisplayLink *l = [CADisplayLink displayLinkWithTarget:p selector:@selector(tick:)];
     [l addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
 }
-
-@interface VeexPanel (Tick)
-- (void)tick:(CADisplayLink *)l;
-@end
-
-@implementation VeexPanel (Tick)
-- (void)tick:(CADisplayLink *)l { if (g.esp && g_draw) [g_draw setNeedsDisplay]; }
-@end
 
 #pragma mark - interpose
 
