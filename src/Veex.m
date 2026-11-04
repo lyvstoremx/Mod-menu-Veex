@@ -69,7 +69,7 @@ static void VXSay(NSString *s) {
     CGRect _btr[2];
     CGRect _slr;
     CGFloat _bx, _by;
-    BOOL _drag, _moved, _inBox, _sliding;
+    BOOL _drag, _moved;
     CGPoint _off;
 }
 
@@ -191,7 +191,7 @@ static void VXSay(NSString *s) {
 
 - (void)touchesBegan:(NSSet *)_t withEvent:(UIEvent *)e {
     CGPoint p = [[_t anyObject] locationInView:self];
-    _moved = NO; _sliding = NO; _inBox = NO;
+    _moved = NO;
     if (!CGRectContainsPoint(self.bubble, p)) return;
     _drag = YES;
     _off = CGPointMake(p.x - _bx, p.y - _by);
@@ -208,12 +208,7 @@ static void VXSay(NSString *s) {
 }
 
 - (void)touchesEnded:(NSSet *)_t withEvent:(UIEvent *)e {
-    if (_drag && _moved) { _drag = NO; return; }
     _drag = NO;
-    CGPoint p = [[_t anyObject] locationInView:self];
-    if (CGRectContainsPoint(self.bubble, p)) { [self setOpen:!self.open]; return; }
-    if (!self.open || !CGRectContainsPoint(_box.frame, p)) { [self setOpen:NO]; return; }
-    [self tocaEn:[self enCaja:p]];
 }
 
 - (void)tocaEn:(CGPoint)q {
@@ -315,6 +310,9 @@ typedef void *(*fn_class_from_name)(void *, const char *, const char *);
 typedef void *(*fn_class_get_method_from_name)(void *, const char *, int);
 typedef void *(*fn_runtime_invoke)(void *, void *, void **, void **);
 typedef void *(*fn_array_new)(void *, size_t);
+typedef void *(*fn_class_get_methods)(void *, void **);
+typedef const char *(*fn_method_get_name)(void *);
+typedef uint32_t (*fn_method_param_count)(void *);
 
 static void *VXS(const char *n) { return dlsym(RTLD_DEFAULT, n); }
 
@@ -327,6 +325,9 @@ static NSString *VXLoadPatch(void) {
     fn_class_get_method_from_name cm = VXS("il2cpp_class_get_method_from_name");
     fn_runtime_invoke ri = VXS("il2cpp_runtime_invoke");
     fn_array_new an = VXS("il2cpp_array_new");
+    fn_class_get_methods gm = VXS("il2cpp_class_get_methods");
+    fn_method_get_name mn = VXS("il2cpp_method_get_name");
+    fn_method_param_count pc = VXS("il2cpp_method_get_param_count");
     if (!dg || !ga || !ai || !inm || !cf || !cm || !ri || !an) return @"1 sin simbolos";
 
     void *dom = dg();
@@ -349,6 +350,22 @@ static NSString *VXLoadPatch(void) {
     void *cls = cf(img, "IFix.Core", "PatchManager");
     if (!cls) return @"6 sin PatchManager";
 
+    void *m = cm(cls, "Load", 1);
+    if (!m) m = cm(cls, "Load", 0);
+    if (!m) m = cm(cls, "Load", 2);
+
+    if (!m) {
+        if (!gm || !mn || !pc) return @"9 sin Load";
+        NSMutableString *s = [NSMutableString stringWithString:@"m:"];
+        void *it = NULL, *mm;
+        int k = 0;
+        while ((mm = gm(cls, &it)) && k++ < 12) {
+            const char *nm2 = mn(mm);
+            if (nm2) [s appendFormat:@" %s/%u", nm2, pc(mm)];
+        }
+        return s;
+    }
+
     NSString *dst = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/Assembly-CSharp.patch.bytes"];
     NSData *d = [NSData dataWithContentsOfFile:dst];
     if (!d) {
@@ -361,33 +378,28 @@ static NSString *VXLoadPatch(void) {
     void *byteCls = cf(msc, "System", "Byte");
     if (!byteCls) return @"8 sin Byte";
 
-    void *m = cm(cls, "Load", 1);
-    if (!m) {
-        m = cm(cls, "Load", 0);
-        if (!m) return @"9 sin Load";
-        void *exc0 = NULL;
-        ri(m, NULL, NULL, &exc0);
-        return exc0 ? @"9b excepcion" : @"ok";
-    }
-
     void *arr = an(byteCls, d.length);
     if (!arr) return @"10 sin arreglo";
     memcpy((char *)arr + 0x20, d.bytes, d.length);
 
+    uint32_t np = pc ? pc(m) : 1;
     void *exc = NULL;
-    void *args[1] = { arr };
-    ri(m, NULL, args, &exc);
-    return exc ? @"11 excepcion al cargar" : @"ok";
+    if (np >= 2) {
+        void *args[2] = { arr, NULL };
+        ri(m, NULL, args, &exc);
+    } else if (np == 1) {
+        void *args[1] = { arr };
+        ri(m, NULL, args, &exc);
+    } else {
+        ri(m, NULL, NULL, &exc);
+    }
+    return exc ? @"11 excepcion" : @"ok";
 }
 
 static void VXArmPatch(void) {
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-        for (int i = 0; i < 3; i++) {
-            NSString *r = VXLoadPatch();
-            VXSay([NSString stringWithFormat:@"carga: %@", r]);
-            if ([r isEqualToString:@"ok"]) return;
-            [NSThread sleepForTimeInterval:2.0];
-        }
+        NSString *r = VXLoadPatch();
+        VXSay([NSString stringWithFormat:@"carga: %@", r]);
     });
 }
 
