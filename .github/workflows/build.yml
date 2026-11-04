@@ -18,8 +18,7 @@ jobs:
           python3 - <<'PY'
           import re, sys, time, requests
 
-          QK = "od7voveps5u10c1"
-          DK = "4o62ssbfdpf"
+          QK = "4eva62qf34t6b46"
           H = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                              "(KHTML, like Gecko) Chrome/126.0 Safari/537.36",
                "Accept": "text/html,application/xhtml+xml,*/*",
@@ -42,11 +41,11 @@ jobs:
 
           link = None
 
-          print("1) repair")
-          for i in range(3):
+          print("1) pagina")
+          for i in range(6):
               try:
-                  r = requests.get("https://www.mediafire.com/dynamic/download_repair.php",
-                                   params={"qkey": QK, "dkey": DK}, headers=H, timeout=40)
+                  r = requests.get("https://www.mediafire.com/file/%s/Veex30.ipa/file" % QK,
+                                   headers=H, timeout=40)
                   print("   %d bytes" % len(r.text))
                   link = find(r.text)
                   if link: break
@@ -55,27 +54,12 @@ jobs:
               time.sleep(4)
 
           if not link:
-              print("2) pagina")
-              for i in range(5):
-                  try:
-                      r = requests.get("https://www.mediafire.com/file/%s/file" % QK,
-                                       headers=H, timeout=40)
-                      print("   %d bytes" % len(r.text))
-                      link = find(r.text)
-                      if link: break
-                  except Exception as e:
-                      print("   %s" % e)
-              time.sleep(4)
-
-          if not link:
-              print("3) api")
+              print("2) repair")
               try:
-                  r = requests.get("https://www.mediafire.com/api/1.5/file/get_links.php",
-                                   params={"quick_key": QK, "link_type": "direct_download",
-                                           "response_format": "json"}, headers=H, timeout=40)
-                  print("   %s" % r.text[:300])
-                  j = r.json()
-                  link = j["response"]["links"][0]["direct_download"]
+                  r = requests.get("https://www.mediafire.com/dynamic/download_repair.php",
+                                   params={"qkey": QK}, headers=H, timeout=40)
+                  print("   %d bytes" % len(r.text))
+                  link = find(r.text)
               except Exception as e:
                   print("   %s" % e)
 
@@ -84,7 +68,7 @@ jobs:
               sys.exit(1)
 
           print("enlace: %s" % link.split("?")[0])
-          r = requests.get(link, headers=H, timeout=1200, stream=True)
+          r = requests.get(link, headers=H, timeout=1800, stream=True)
           r.raise_for_status()
           n = 0
           with open("work/base.ipa", "wb") as f:
@@ -109,7 +93,6 @@ jobs:
           A="$PWD/app/Payload/$(ls app/Payload | grep '\.app$' | head -1)"
           echo "APP=$A" >> $GITHUB_ENV
           echo "UF=$A/Frameworks/UnityFramework.framework/UnityFramework" >> $GITHUB_ENV
-          ls -la "$A" | head
 
       - name: Compilar
         run: |
@@ -124,21 +107,27 @@ jobs:
           xcrun -sdk iphoneos strip -x out/libveexcore.dylib
           ls -la out/
 
-      - name: Inyectar
+      - name: Reemplazar dylib
         run: |
           set -euo pipefail
           python3 -m pip install --quiet --break-system-packages lief
-          python3 -c 'import lief,sys;b=lief.parse(sys.argv[1]);b.add_library("libveexcore.dylib");b.write(sys.argv[1])' "$UF"
-          cp out/libveexcore.dylib "$APP/Frameworks/"
-          cp out/libveexcore.dylib "$APP/Frameworks/UnityFramework.framework/"
-          cp out/libveexcore.dylib "$APP/"
+          if otool -L "$UF" | grep -qi veex; then
+            echo "ya trae el load command, solo cambio el archivo"
+          else
+            echo "no lo trae, inyectando"
+            python3 -c 'import lief,sys;b=lief.parse(sys.argv[1]);b.add_library("libveexcore.dylib");b.write(sys.argv[1])' "$UF"
+          fi
+          mkdir -p "$APP/Frameworks/UnityFramework.framework"
+          cp -f out/libveexcore.dylib "$APP/Frameworks/"
+          cp -f out/libveexcore.dylib "$APP/Frameworks/UnityFramework.framework/"
+          cp -f out/libveexcore.dylib "$APP/"
           chmod +x "$APP/Frameworks/libveexcore.dylib"
 
       - name: Verificar
         run: |
           set -euo pipefail
-          otool -L "$UF" | grep -i veex || { echo "NO QUEDO EL LC_LOAD_DYLIB"; exit 1; }
-          echo "inyeccion ok"
+          otool -L "$UF" | grep -i veex || { echo "SIN LC_LOAD_DYLIB"; exit 1; }
+          echo "ok"
 
       - name: Firmar
         run: |
@@ -156,7 +145,6 @@ jobs:
           zip -qry ../../Veex.ipa Payload
           cd ../..
           unzip -l Veex.ipa | head -6
-          ls -la Veex.ipa
 
       - uses: actions/upload-artifact@v4
         with:
