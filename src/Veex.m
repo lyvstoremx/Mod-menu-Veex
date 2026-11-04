@@ -473,6 +473,6 @@ __attribute__((constructor)) static void VXInit(void) {
 #if VX_HIDE
     VXHide();
 #endif
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)),
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(8 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{ VXInstall(); });
 }
