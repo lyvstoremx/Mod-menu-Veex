@@ -64,7 +64,6 @@ static UIWindow *g_win;
 static UIView *g_draw;
 static UILabel *g_diag;
 static NSString *g_patch;
-static NSString *g_url;
 
 static void VXSay(NSString *s) {
     dispatch_async(dispatch_get_main_queue(), ^{ if (g_diag) g_diag.text = s; });
@@ -77,6 +76,14 @@ static BOOL VXIsPatch(NSString *p) {
     if ([n containsString:@"assembly-csharp"] || [n containsString:@"remote_patch"] || [n containsString:@"-patch"]) return YES;
     NSDictionary *a = [[NSFileManager defaultManager] attributesOfItemAtPath:p error:nil];
     return a && [a fileSize] > 20000 && [a fileSize] < 40000000;
+}
+
+static NSString *VXHead(NSString *p) {
+    NSFileHandle *fh = [NSFileHandle fileHandleForReadingAtPath:p];
+    if (!fh) return nil;
+    NSData *d = [fh readDataOfLength:8];
+    [fh closeFile];
+    return [[NSString alloc] initWithData:d encoding:NSISOLatin1StringEncoding];
 }
 
 static NSString *VXFindPatch(void) {
@@ -92,11 +99,9 @@ static NSString *VXFindPatch(void) {
         NSDirectoryEnumerator *e = [fm enumeratorAtPath:d];
         for (NSString *f in e) {
             NSString *full = [d stringByAppendingPathComponent:f];
-            if (VXIsPatch(full)) {
-                NSData *head = [NSData dataWithContentsOfFile:full options:0 range:NSMakeRange(0, 8) error:nil];
-                NSString *magic = [[NSString alloc] initWithData:head encoding:NSISOLatin1StringEncoding];
-                if ([magic hasPrefix:@"UnityFS"] || [magic hasPrefix:@"IFix"] || [magic hasPrefix:@"MZ"]) return full;
-            }
+            if (!VXIsPatch(full)) continue;
+            NSString *magic = VXHead(full);
+            if ([magic hasPrefix:@"UnityFS"] || [magic hasPrefix:@"IFix"] || [magic hasPrefix:@"MZ"]) return full;
         }
     }
     return nil;
@@ -126,7 +131,7 @@ static void VXUpload(NSString *path) {
     [[NSURLSession.sharedSession dataTaskWithRequest:r completionHandler:^(NSData *rd, NSURLResponse *resp, NSError *err) {
         NSString *txt = rd ? [[NSString alloc] initWithData:rd encoding:NSUTF8StringEncoding] : nil;
         txt = [txt stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
-        if (txt.length && [txt hasPrefix:@"http"]) { g_url = txt; VXSay(txt); }
+        if (txt.length && [txt hasPrefix:@"http"]) VXSay(txt);
         else VXSay([NSString stringWithFormat:@"fallo %ld", (long)((NSHTTPURLResponse *)resp).statusCode]);
     }] resume];
 }
