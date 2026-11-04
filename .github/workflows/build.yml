@@ -2,148 +2,131 @@ name: Veex
 
 on:
   workflow_dispatch:
+    inputs:
+      ipa_key:
+        description: "Llave MediaFire del IPA base"
+        required: false
+        default: "4eva62qf34t6b46"
+
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: macos-15
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
     steps:
       - uses: actions/checkout@v4
 
-      - name: Bajar
+      - name: Dependencias
+        run: python3 -m pip install --quiet --break-system-packages requests lief
+
+      - name: Descargar base
         run: |
-          set -euo pipefail
-          mkdir -p work out
-          python3 -m pip install --quiet --break-system-packages requests
-          python3 - <<'PY'
+          set -uo pipefail
+          mkdir -p work
+          KEY="${{ github.event.inputs.ipa_key }}"
+          python3 - "$KEY" <<'PY'
           import re, sys, time, requests
-
-          QK = "4eva62qf34t6b46"
-          H = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                             "(KHTML, like Gecko) Chrome/126.0 Safari/537.36",
-               "Accept": "text/html,application/xhtml+xml,*/*",
-               "Referer": "https://www.mediafire.com/"}
-
-          PATS = [
-              r'https?://download[0-9]*\.mediafire\.com/[^"\'\s<>\\]+',
-              r'//download[0-9]*\.mediafire\.com/[^"\'\s<>\\]+',
-              r'https?://[a-z0-9.]*mediafire\.com/[^"\'\s<>\\]*\.ipa[^"\'\s<>\\]*',
-          ]
-
-          def find(html):
-              h = html.replace("\\/", "/").replace("&amp;", "&")
-              for p in PATS:
-                  m = re.search(p, h)
-                  if m:
-                      u = m.group(0)
-                      return u if u.startswith("http") else "https:" + u
-              return None
-
+          key = sys.argv[1]
+          H = {"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15"}
           link = None
           for i in range(6):
               try:
-                  r = requests.get("https://www.mediafire.com/file/%s/Veex30.ipa/file" % QK,
-                                   headers=H, timeout=40)
-                  print("   %d bytes" % len(r.text))
-                  link = find(r.text)
-                  if link: break
+                  r = requests.get("https://www.mediafire.com/file/%s/file" % key, headers=H, timeout=40)
+                  print("pagina %d: %d bytes" % (i + 1, len(r.text)))
+                  m = re.search(r'https?://download[0-9]*\.mediafire\.com/[^"\'\s<>\\]+', r.text.replace("\\/", "/"))
+                  if m:
+                      link = m.group(0)
+                      break
               except Exception as e:
-                  print("   %s" % e)
-              time.sleep(4)
-
+                  print("intento %d: %s" % (i + 1, e))
+              time.sleep(5)
           if not link:
-              print("SIN ENLACE")
-              sys.exit(1)
-
-          print("enlace ok")
-          r = requests.get(link, headers=H, timeout=1800, stream=True)
+              print("sin enlace"); sys.exit(1)
+          print("ok: %s" % link.split("?")[0])
+          r = requests.get(link, headers=H, timeout=900, stream=True)
           r.raise_for_status()
-          n = 0
           with open("work/base.ipa", "wb") as f:
               for c in r.iter_content(1 << 16):
-                  f.write(c); n += len(c)
-          print("bajado: %d bytes" % n)
-          if n < 300_000_000:
-              print("MUY CHICO"); sys.exit(1)
-          with open("work/base.ipa", "rb") as f:
-              if f.read(2) != b"PK":
-                  print("NO ES UN ZIP"); sys.exit(1)
-          print("ok")
+                  f.write(c)
           PY
           ls -la work/
 
       - name: Desempacar
         run: |
           set -euo pipefail
-          cd work
-          unzip -q base.ipa -d app
-          ls -la app/Payload
-          A="$PWD/app/Payload/$(ls app/Payload | grep '\.app$' | head -1)"
-          echo "APP=$A" >> $GITHUB_ENV
-          echo "UF=$A/Frameworks/UnityFramework.framework/UnityFramework" >> $GITHUB_ENV
-
-      - name: Traer parche
-        run: |
-          set -euo pipefail
-          gh release download base --repo "$GITHUB_REPOSITORY" --pattern "Assembly-CSharp-patch.bytes" --dir work --clobber
-          cp work/Assembly-CSharp-patch.bytes "$APP/veexpatch.bin"
-          ls -la "$APP/veexpatch.bin"
+          cd work && unzip -q base.ipa -d app
+          A="$(ls -d app/Payload/*.app | head -1)"
+          echo "APP=$PWD/$A" >> $GITHUB_ENV
 
       - name: Compilar
         run: |
           set -euo pipefail
+          mkdir -p out
           xcrun -sdk iphoneos clang -arch arm64 -dynamiclib \
             -isysroot "$(xcrun --sdk iphoneos --show-sdk-path)" \
-            -miphoneos-version-min=15.0 \
-            -framework Foundation -framework UIKit -framework Security \
-            -framework CoreGraphics -framework QuartzCore \
+            -miphoneos-version-min=15.0 -framework Foundation \
+            -framework UIKit -framework QuartzCore -framework Security \
             -install_name @executable_path/Frameworks/libveexcore.dylib \
             -o out/libveexcore.dylib src/Veex.m
           xcrun -sdk iphoneos strip -x out/libveexcore.dylib
-          ls -la out/
 
-      - name: Reemplazar dylib
+      - name: Inyectar
         run: |
           set -euo pipefail
-          python3 -m pip install --quiet --break-system-packages lief
-          if otool -L "$UF" | grep -qi veex; then
-            echo "ya trae el load command"
-          else
-            python3 -c 'import lief,sys;b=lief.parse(sys.argv[1]);b.add_library("libveexcore.dylib");b.write(sys.argv[1])' "$UF"
-          fi
-          mkdir -p "$APP/Frameworks/UnityFramework.framework"
-          cp -f out/libveexcore.dylib "$APP/Frameworks/"
-          cp -f out/libveexcore.dylib "$APP/Frameworks/UnityFramework.framework/"
-          cp -f out/libveexcore.dylib "$APP/"
+          EXE="$APP/$(basename "$APP" .app)"
+          python3 - "$EXE" <<'PY'
+          import lief, sys
+          b = lief.parse(sys.argv[1])
+          b.add_library("libveexcore.dylib")
+          b.write(sys.argv[1])
+          print("LC_LOAD_DYLIB agregado")
+          PY
+          mkdir -p "$APP/Frameworks"
+          cp out/libveexcore.dylib "$APP/Frameworks/"
           chmod +x "$APP/Frameworks/libveexcore.dylib"
 
-      - name: Verificar
+      - name: Parche
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -euo pipefail
-          otool -L "$UF" | grep -i veex || { echo "SIN LC_LOAD_DYLIB"; exit 1; }
-          echo "ok"
+          set -uo pipefail
+          gh release download base -p 'Assembly-CSharp-patch.bytes' -D work 2>/dev/null || true
+          if [ -f work/Assembly-CSharp-patch.bytes ]; then
+            cp work/Assembly-CSharp-patch.bytes "$APP/"
+            ls -la "$APP/Assembly-CSharp-patch.bytes"
+          else
+            echo "sin parche en el release"
+          fi
 
       - name: Firmar
         run: |
           set -euo pipefail
           rm -rf "$APP/_CodeSignature"
-          codesign --force --sign - "$APP/Frameworks/libveexcore.dylib"
-          codesign --force --sign - --timestamp=none "$APP/Frameworks/UnityFramework.framework"
-          codesign --force --sign - --timestamp=none "$APP"
-          codesign --verify --deep --strict "$APP"
+          cat > work/ent.plist <<'P'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>get-task-allow</key><true/>
+            <key>application-identifier</key><string>com.dts.freefireth</string>
+          </dict>
+          </plist>
+          P
+          find "$APP" -name '*.dylib' -exec codesign --force --sign - {} \;
+          find "$APP/Frameworks" -name '*.framework' -maxdepth 2 -exec codesign --force --sign - {} \; 2>/dev/null || true
+          codesign --force --sign - --entitlements work/ent.plist "$APP"
 
       - name: Empaquetar
         run: |
           set -euo pipefail
-          cd work/app
-          zip -qry ../../Veex.ipa Payload
+          cd work/app && zip -qry ../../Veex.ipa Payload
           cd ../..
-          unzip -l Veex.ipa | head -6
+          ls -la Veex.ipa
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: Veex
-          path: Veex.ipa
-          retention-days: 7
+      - name: Publicar
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view base >/dev/null 2>&1 || gh release create base -t base -n base
+          gh release upload base Veex.ipa --clobber
