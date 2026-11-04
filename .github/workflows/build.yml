@@ -17,7 +17,6 @@ jobs:
           set -euo pipefail
           mkdir -p work out
           gh release download --repo "$GITHUB_REPOSITORY" --pattern "*.ipa" --dir work --clobber
-          echo "--- disponibles (bytes) ---"
           stat -f "%z %N" work/*.ipa
 
       - name: Desempacar
@@ -25,11 +24,12 @@ jobs:
           set -euo pipefail
           cd work
           F=$(ls -S *.ipa | tail -1)
-          echo "USANDO (la mas chica): $F"
+          echo "USANDO: $F"
           ls -S *.ipa | tail -n +2 | xargs -r rm -f
           unzip -q "$F" -d app
           A="$PWD/app/Payload/$(ls app/Payload)"
           echo "APP=$A" >> $GITHUB_ENV
+          echo "UF=$A/Frameworks/UnityFramework.framework/UnityFramework" >> $GITHUB_ENV
           ls -la "$A" | head
 
       - name: Compilar
@@ -49,12 +49,22 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m pip install --quiet --break-system-packages lief
-          UF="$APP/Frameworks/UnityFramework.framework/UnityFramework"
+          cp "$UF" /tmp/uf.bak
           python3 -c 'import lief,sys;b=lief.parse(sys.argv[1]);b.add_library("libveexcore.dylib");b.write(sys.argv[1])' "$UF"
           cp out/libveexcore.dylib "$APP/Frameworks/"
           cp out/libveexcore.dylib "$APP/Frameworks/UnityFramework.framework/"
           cp out/libveexcore.dylib "$APP/"
           chmod +x "$APP/Frameworks/libveexcore.dylib"
+
+      - name: Verificar inyeccion
+        run: |
+          set -euo pipefail
+          echo "--- tamano antes/despues ---"
+          stat -f "%z" /tmp/uf.bak
+          stat -f "%z" "$UF"
+          echo "--- load commands ---"
+          otool -L "$UF" | grep -i veex || { echo "NO QUEDO EL LC_LOAD_DYLIB"; exit 1; }
+          echo "inyeccion ok"
 
       - name: Firmar
         run: |
@@ -63,6 +73,11 @@ jobs:
           codesign --force --sign - "$APP/Frameworks/libveexcore.dylib"
           codesign --force --sign - --timestamp=none "$APP/Frameworks/UnityFramework.framework"
           codesign --force --sign - --timestamp=none "$APP"
+
+      - name: Verificar firma
+        run: |
+          set -euo pipefail
+          codesign --verify --deep --strict "$APP" && echo "firma ok"
 
       - name: Empaquetar
         run: |
