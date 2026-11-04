@@ -350,9 +350,10 @@ static NSString *VXLoadPatch(void) {
     void *cls = cf(img, "IFix.Core", "PatchManager");
     if (!cls) return @"6 sin PatchManager";
 
-    void *m = cm(cls, "OptimizeLoad", 2);
+    void *m = cm(cls, "OptimizeLoad", 4);
+    if (!m) m = cm(cls, "OptimizeLoad", 2);
     if (!m) m = cm(cls, "Load", 1);
-    if (!m) m = cm(cls, "Load", 0);
+    if (!m) m = cm(cls, "<readMethod>m__1", 1);
 
     if (!m) {
         if (!gm || !mn || !pc) return @"9 sin metodo";
@@ -384,7 +385,7 @@ static NSString *VXLoadPatch(void) {
 
     int zero = 0;
     void *exc = NULL;
-    void *args[2] = { arr, &zero };
+    void *args[4] = { arr, &zero, &zero, &zero };
     ri(m, NULL, args, &exc);
     return exc ? @"11 excepcion" : @"ok";
 }
