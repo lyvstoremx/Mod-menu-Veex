@@ -46,7 +46,26 @@ jobs:
           $t = Get-Content $p -Raw
           $t = $t -replace 'TextAnchor oldAlign = GUI\.skin\.label\.alignment;', 'TextAnchor oldAlign = TextAnchor.UpperLeft;'
           Set-Content $p $t -NoNewline
-          Select-String -Path $p -Pattern 'oldAlign' | Select-Object -First 2
+
+      - name: Quitar blobs de arreglos
+        working-directory: ref
+        shell: python
+        run: |
+          import re
+          p = r"src\ESPLogic.template.cs"
+          src = open(p, encoding="utf-8").read()
+
+          def conv(m):
+              prefix, typ, name, body = m.group(1), m.group(2), m.group(3), m.group(4)
+              items = [x.strip() for x in body.split(",") if x.strip()]
+              out = "%snew %s[%d];\n" % (prefix, typ, len(items))
+              for i, it in enumerate(items):
+                  out += "                %s[%d] = %s;\n" % (name, i, it)
+              return out
+
+          src2, n = re.subn(r"(\b(string|int)\[\]\s+(\w+)\s*=\s*)\{([^{}]*)\};", conv, src)
+          open(p, "w", encoding="utf-8").write(src2)
+          print("arreglos convertidos:", n)
 
       - name: Compilar parche
         working-directory: ref
