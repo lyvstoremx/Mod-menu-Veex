@@ -313,6 +313,8 @@ typedef void *(*fn_array_new)(void *, size_t);
 typedef void *(*fn_class_get_methods)(void *, void **);
 typedef const char *(*fn_method_get_name)(void *);
 typedef uint32_t (*fn_method_param_count)(void *);
+typedef void *(*fn_method_get_param)(void *, uint32_t);
+typedef const char *(*fn_type_get_name)(void *);
 
 static void *VXS(const char *n) { return dlsym(RTLD_DEFAULT, n); }
 
@@ -322,13 +324,12 @@ static NSString *VXLoadPatch(void) {
     fn_assembly_get_image ai = VXS("il2cpp_assembly_get_image");
     fn_image_get_name inm = VXS("il2cpp_image_get_name");
     fn_class_from_name cf = VXS("il2cpp_class_from_name");
-    fn_class_get_method_from_name cm = VXS("il2cpp_class_get_method_from_name");
-    fn_runtime_invoke ri = VXS("il2cpp_runtime_invoke");
-    fn_array_new an = VXS("il2cpp_array_new");
     fn_class_get_methods gm = VXS("il2cpp_class_get_methods");
     fn_method_get_name mn = VXS("il2cpp_method_get_name");
     fn_method_param_count pc = VXS("il2cpp_method_get_param_count");
-    if (!dg || !ga || !ai || !inm || !cf || !cm || !ri || !an) return @"1 sin simbolos";
+    fn_method_get_param mp = VXS("il2cpp_method_get_param");
+    fn_type_get_name tn = VXS("il2cpp_type_get_name");
+    if (!dg || !ga || !ai || !inm || !cf) return @"1 sin simbolos";
 
     void *dom = dg();
     if (!dom) return @"2 sin dominio";
@@ -336,64 +337,41 @@ static NSString *VXLoadPatch(void) {
     void **as = ga(dom, &n);
     if (!as || n == 0) return @"3 sin ensamblados";
 
-    void *img = NULL, *msc = NULL;
+    void *img = NULL;
     for (size_t i = 0; i < n; i++) {
         void *im = ai(as[i]);
         const char *nm = im ? inm(im) : NULL;
-        if (!nm) continue;
-        if (strstr(nm, "IFix.Core")) img = im;
-        if (strstr(nm, "mscorlib")) msc = im;
+        if (nm && strstr(nm, "IFix.Core")) { img = im; break; }
     }
     if (!img) return [NSString stringWithFormat:@"4 sin IFix (de %zu)", n];
-    if (!msc) return @"5 sin mscorlib";
 
     void *cls = cf(img, "IFix.Core", "PatchManager");
     if (!cls) return @"6 sin PatchManager";
 
-    void *m = cm(cls, "OptimizeLoad", 4);
-    if (!m) m = cm(cls, "OptimizeLoad", 2);
-    if (!m) m = cm(cls, "Load", 1);
-    if (!m) m = cm(cls, "<readMethod>m__1", 1);
+    if (!gm || !mn || !pc || !mp || !tn) return @"sin firmas";
 
-    if (!m) {
-        if (!gm || !mn || !pc) return @"9 sin metodo";
-        NSMutableString *s = [NSMutableString stringWithString:@"m:"];
-        void *it = NULL, *mm;
-        int k = 0;
-        while ((mm = gm(cls, &it)) && k++ < 12) {
-            const char *nm2 = mn(mm);
-            if (nm2) [s appendFormat:@" %s/%u", nm2, pc(mm)];
+    NSMutableString *s = [NSMutableString stringWithString:@"sig:"];
+    void *it = NULL, *mm;
+    int k = 0;
+    while ((mm = gm(cls, &it)) && k++ < 6) {
+        const char *nm2 = mn(mm);
+        if (!nm2) continue;
+        [s appendFormat:@" %s(", nm2];
+        uint32_t np = pc(mm);
+        for (uint32_t j = 0; j < np && j < 5; j++) {
+            void *ty = mp(mm, j);
+            const char *tname = ty ? tn(ty) : NULL;
+            [s appendFormat:@"%s,", tname ? tname : "?"];
         }
-        return s;
+        [s appendString:@")"];
     }
-
-    NSString *dst = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/Assembly-CSharp.patch.bytes"];
-    NSData *d = [NSData dataWithContentsOfFile:dst];
-    if (!d) {
-        NSString *src = [[[NSBundle mainBundle] bundlePath] stringByAppendingPathComponent:@"veexpatch.bin"];
-        d = [NSData dataWithContentsOfFile:src];
-        if (!d) return @"7 sin archivo";
-        [d writeToFile:dst atomically:YES];
-    }
-
-    void *byteCls = cf(msc, "System", "Byte");
-    if (!byteCls) return @"8 sin Byte";
-
-    void *arr = an(byteCls, d.length);
-    if (!arr) return @"10 sin arreglo";
-    memcpy((char *)arr + 0x20, d.bytes, d.length);
-
-    int zero = 0;
-    void *exc = NULL;
-    void *args[4] = { arr, &zero, &zero, &zero };
-    ri(m, NULL, args, &exc);
-    return exc ? @"11 excepcion" : @"ok";
+    return s;
 }
 
 static void VXArmPatch(void) {
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
         NSString *r = VXLoadPatch();
-        VXSay([NSString stringWithFormat:@"carga: %@", r]);
+        VXSay([NSString stringWithFormat:@"%@", r]);
     });
 }
 
