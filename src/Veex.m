@@ -199,8 +199,12 @@ static void VXUpload(NSString *path) {
     UIView *_box;
     UISlider *_fov;
     UILabel *_fovVal;
+    UISwitch *_sw[4];
+    CGRect _swr[4];
+    CGRect _btr[2];
+    CGRect _slr;
     CGFloat _bx, _by;
-    BOOL _drag, _moved;
+    BOOL _drag, _moved, _inBox, _sliding;
     CGPoint _off;
 }
 
@@ -216,11 +220,12 @@ static void VXUpload(NSString *path) {
 }
 
 - (void)buildBox {
-    _box = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 250, 306)];
+    _box = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 250, 330)];
     _box.backgroundColor = [UIColor colorWithWhite:0.06 alpha:0.94];
     _box.layer.cornerRadius = 14;
     _box.layer.borderWidth = 1;
     _box.layer.borderColor = [UIColor colorWithRed:0.2 green:0.9 blue:0.4 alpha:0.5].CGColor;
+    _box.userInteractionEnabled = NO;
     _box.hidden = YES;
     [self addSubview:_box];
 
@@ -230,59 +235,61 @@ static void VXUpload(NSString *path) {
     t.textColor = UIColor.greenColor;
     [_box addSubview:t];
 
-    [self row:@"ESP" y:38 on:NO act:@selector(onEsp:)];
-    [self row:@"AIM" y:72 on:NO act:@selector(onAim:)];
-    [self row:@"VISIBLE" y:106 on:NO act:@selector(onVis:)];
-    [self row:@"AUTO FIRE" y:140 on:NO act:@selector(onFire:)];
+    NSArray *nombres = @[ @"ESP", @"AIM", @"VISIBLE", @"AUTO FIRE" ];
+    for (int i = 0; i < 4; i++) {
+        CGFloat y = 38 + i * 34;
+        UILabel *l = [[UILabel alloc] initWithFrame:CGRectMake(14, y + 4, 150, 20)];
+        l.text = nombres[i];
+        l.font = [UIFont systemFontOfSize:13];
+        l.textColor = UIColor.whiteColor;
+        [_box addSubview:l];
 
-    _fovVal = [[UILabel alloc] initWithFrame:CGRectMake(14, 174, 220, 16)];
+        UISwitch *s = [[UISwitch alloc] initWithFrame:CGRectMake(184, y, 51, 31)];
+        s.on = NO;
+        s.transform = CGAffineTransformMakeScale(0.78, 0.78);
+        s.userInteractionEnabled = NO;
+        [_box addSubview:s];
+        _sw[i] = s;
+        _swr[i] = CGRectMake(180, y - 3, 56, 37);
+    }
+
+    _fovVal = [[UILabel alloc] initWithFrame:CGRectMake(14, 178, 220, 16)];
     _fovVal.text = @"FOV 140";
     _fovVal.font = [UIFont systemFontOfSize:12];
     _fovVal.textColor = UIColor.lightGrayColor;
     [_box addSubview:_fovVal];
 
-    _fov = [[UISlider alloc] initWithFrame:CGRectMake(14, 192, 222, 30)];
+    _fov = [[UISlider alloc] initWithFrame:CGRectMake(14, 196, 222, 30)];
     _fov.minimumValue = 40;
     _fov.maximumValue = 300;
     _fov.value = 140;
+    _fov.userInteractionEnabled = NO;
     g.fov = 140;
-    [_fov addTarget:self action:@selector(onFov:) forControlEvents:UIControlEventValueChanged];
     [_box addSubview:_fov];
+    _slr = CGRectMake(10, 194, 230, 34);
 
-    [self button:@"SUBIR PARCHE" y:230 act:@selector(doPatch)];
-    [self button:@"RESET INVITADO" y:266 act:@selector(doReset)];
+    _btr[0] = CGRectMake(14, 234, 222, 32);
+    _btr[1] = CGRectMake(14, 272, 222, 32);
+    [self boton:@"SUBIR PARCHE" r:_btr[0]];
+    [self boton:@"RESET INVITADO" r:_btr[1]];
 
-    g_diag = [[UILabel alloc] initWithFrame:CGRectMake(10, 300, 230, 0)];
+    g_diag = [[UILabel alloc] initWithFrame:CGRectMake(10, 310, 230, 0)];
     g_diag.font = [UIFont systemFontOfSize:9];
     g_diag.textColor = UIColor.yellowColor;
     g_diag.numberOfLines = 0;
     [_box addSubview:g_diag];
 }
 
-- (void)row:(NSString *)txt y:(CGFloat)y on:(BOOL)on act:(SEL)act {
-    UILabel *l = [[UILabel alloc] initWithFrame:CGRectMake(14, y + 4, 150, 20)];
-    l.text = txt;
-    l.font = [UIFont systemFontOfSize:13];
-    l.textColor = UIColor.whiteColor;
-    [_box addSubview:l];
-
-    UISwitch *s = [[UISwitch alloc] initWithFrame:CGRectMake(184, y, 51, 31)];
-    s.on = on;
-    s.transform = CGAffineTransformMakeScale(0.78, 0.78);
-    [s addTarget:self action:act forControlEvents:UIControlEventValueChanged];
-    [_box addSubview:s];
-}
-
-- (void)button:(NSString *)txt y:(CGFloat)y act:(SEL)act {
+- (void)boton:(NSString *)txt r:(CGRect)r {
     UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
-    b.frame = CGRectMake(14, y, 222, 30);
+    b.frame = r;
     [b setTitle:txt forState:UIControlStateNormal];
     b.titleLabel.font = [UIFont boldSystemFontOfSize:12];
     [b setTitleColor:UIColor.greenColor forState:UIControlStateNormal];
     b.layer.cornerRadius = 8;
     b.layer.borderWidth = 1;
     b.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.25].CGColor;
-    [b addTarget:self action:act forControlEvents:UIControlEventTouchUpInside];
+    b.userInteractionEnabled = NO;
     [_box addSubview:b];
 }
 
@@ -304,29 +311,70 @@ static void VXUpload(NSString *path) {
     _box.frame = CGRectMake(x, y, w, h);
 }
 
-- (void)touchesBegan:(NSSet *)touches withEvent:(UIEvent *)e {
-    CGPoint p = [[touches anyObject] locationInView:self];
+- (void)touchesBegan:(NSSet *)_t withEvent:(UIEvent *)e {
+    CGPoint p = [[_t anyObject] locationInView:self];
+    _moved = NO; _sliding = NO; _inBox = NO;
     if (CGRectContainsPoint(self.bubble, p)) {
-        _drag = YES; _moved = NO;
+        _drag = YES;
         _off = CGPointMake(p.x - _bx, p.y - _by);
-    } else if (!self.open || !CGRectContainsPoint(_box.frame, p)) {
-        [self setOpen:NO];
+        return;
     }
-}
-
-- (void)touchesMoved:(NSSet *)touches withEvent:(UIEvent *)e {
-    if (!_drag) return;
-    CGPoint p = [[touches anyObject] locationInView:self];
-    _bx = MAX(6, MIN(p.x - _off.x, self.bounds.size.width - 62));
-    _by = MAX(44, MIN(p.y - _off.y, self.bounds.size.height - 100));
-    _moved = YES;
-    [self setNeedsDisplay];
-    if (self.open) [self layoutBox];
-}
-
-- (void)touchesEnded:(NSSet *)touches withEvent:(UIEvent *)e {
-    if (_drag && !_moved) [self setOpen:!self.open];
     _drag = NO;
+    if (!self.open || !CGRectContainsPoint(_box.frame, p)) {
+        [self setOpen:NO];
+        return;
+    }
+    _inBox = YES;
+    if (CGRectContainsPoint(_slr, p)) { _sliding = YES; [self desliza:p]; }
+}
+
+- (void)touchesMoved:(NSSet *)_t withEvent:(UIEvent *)e {
+    CGPoint p = [[_t anyObject] locationInView:self];
+    if (_drag) {
+        _bx = MAX(6, MIN(p.x - _off.x, self.bounds.size.width - 62));
+        _by = MAX(44, MIN(p.y - _off.y, self.bounds.size.height - 100));
+        _moved = YES;
+        [self setNeedsDisplay];
+        if (self.open) [self layoutBox];
+        return;
+    }
+    if (_sliding) { _moved = YES; [self desliza:p]; }
+}
+
+- (void)touchesEnded:(NSSet *)_t withEvent:(UIEvent *)e {
+    CGPoint p = [[_t anyObject] locationInView:self];
+    if (_drag && !_moved) { [self setOpen:!self.open]; _drag = NO; return; }
+    _drag = NO;
+    if (!_inBox || _moved || _sliding) return;
+    [self tocaEn:p];
+}
+
+- (void)tocaEn:(CGPoint)p {
+    for (int i = 0; i < 4; i++) {
+        if (CGRectContainsPoint(_swr[i], p)) {
+            _sw[i].on = !_sw[i].on;
+            [self aplica:i];
+            return;
+        }
+    }
+    if (CGRectContainsPoint(_btr[0], p)) { [self doPatch]; return; }
+    if (CGRectContainsPoint(_btr[1], p)) { [self doReset]; return; }
+}
+
+- (void)desliza:(CGPoint)p {
+    CGFloat t = (p.x - _slr.origin.x) / _slr.size.width;
+    t = MAX(0, MIN(1, t));
+    _fov.value = 40 + t * 260;
+    g.fov = _fov.value;
+    _fovVal.text = [NSString stringWithFormat:@"FOV %.0f", g.fov];
+    if (g_draw) [g_draw setNeedsDisplay];
+}
+
+- (void)aplica:(int)i {
+    if (i == 0) { g.esp = _sw[0].on; if (g_draw) [g_draw setNeedsDisplay]; }
+    if (i == 1) g.aim = _sw[1].on;
+    if (i == 2) g.visOnly = _sw[2].on;
+    if (i == 3) g.fire = _sw[3].on;
 }
 
 - (void)setOpen:(BOOL)o {
@@ -354,18 +402,8 @@ static void VXUpload(NSString *path) {
 
 #pragma mark - acciones
 
-- (void)onEsp:(UISwitch *)s { g.esp = s.on; if (g_draw) [g_draw setNeedsDisplay]; }
-- (void)onAim:(UISwitch *)s { g.aim = s.on; }
-- (void)onVis:(UISwitch *)s { g.visOnly = s.on; }
-- (void)onFire:(UISwitch *)s { g.fire = s.on; }
-
-- (void)onFov:(UISlider *)s {
-    g.fov = s.value;
-    _fovVal.text = [NSString stringWithFormat:@"FOV %.0f", s.value];
-    if (g_draw) [g_draw setNeedsDisplay];
-}
-
 - (void)doPatch {
+    VXSay(@"buscando...");
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         NSString *p = VXFindPatch();
         if (!p) { VXSay(@"no encontré parche"); return; }
