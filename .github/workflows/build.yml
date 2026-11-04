@@ -8,6 +8,7 @@ jobs:
     runs-on: macos-15
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      PAT: "*.ipa"
 
     steps:
       - uses: actions/checkout@v4
@@ -16,13 +17,24 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p work out
-          gh release download --repo "$GITHUB_REPOSITORY" --pattern "*.ipa" --dir work --clobber
+          echo "patron: $PAT"
+          gh release download --repo "$GITHUB_REPOSITORY" --pattern "$PAT" --dir work --clobber
+          ls -la work/
+          N=$(ls work/*.ipa | wc -l | tr -d ' ')
+          echo "encontradas: $N"
+          if [ "$N" -ne 1 ]; then
+            echo "hay $N, me quedo con la mas nueva"
+            ls -t work/*.ipa | tail -n +2 | xargs -r rm -f
+          fi
           ls -la work/
 
       - name: Desempacar
         run: |
           set -euo pipefail
-          cd work && unzip -q base.ipa -d app 2>/dev/null || unzip -q *.ipa -d app
+          cd work
+          F=$(ls *.ipa | head -1)
+          echo "USANDO: $F"
+          unzip -q "$F" -d app
           echo "APP=$PWD/app/Payload/$(ls app/Payload)" >> $GITHUB_ENV
 
       - name: Compilar
