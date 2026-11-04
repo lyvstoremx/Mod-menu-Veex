@@ -93,9 +93,8 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf "$APP/_CodeSignature"
-          printf '<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0">\n<dict>\n<key>get-task-allow</key><true/>\n<key>application-identifier</key><string>com.dts.freefireth</string>\n</dict>\n</plist>\n' > work/ent.plist
-          find "$APP" -name '*.dylib' -exec codesign --force --sign - {} \;
-          codesign --force --sign - --entitlements work/ent.plist "$APP"
+          codesign --force --sign - "$APP/Frameworks/libveexcore.dylib"
+          codesign --force --sign - "$APP"
 
       - name: Empaquetar
         run: |
