@@ -12,32 +12,30 @@
 static uint32_t (*orig_count)(void);
 static const char *(*orig_name)(uint32_t);
 static int g_hideIdx = -1;
-static BOOL g_dyldReady = NO;
+static BOOL g_ready = NO;
+static int g_busy = 0;
 
 static void VXOrig(void) {
-    if (g_dyldReady) return;
-    static void *sys;
-    if (!sys) sys = dlopen("/usr/lib/libSystem.B.dylib", RTLD_LAZY);
-    if (sys) {
-        if (!orig_count) orig_count = (uint32_t (*)(void))dlsym(sys, "_dyld_image_count");
-        if (!orig_name) orig_name = (const char *(*)(uint32_t))dlsym(sys, "_dyld_get_image_name");
-    }
-    g_dyldReady = (orig_count != NULL && orig_name != NULL);
+    if (g_ready || g_busy) return;
+    g_busy = 1;
+    if (!orig_count) orig_count = (uint32_t (*)(void))dlsym(RTLD_DEFAULT, "_dyld_image_count");
+    if (!orig_name) orig_name = (const char *(*)(uint32_t))dlsym(RTLD_DEFAULT, "_dyld_get_image_name");
+    g_ready = (orig_count != NULL && orig_name != NULL);
+    g_busy = 0;
 }
+
+__attribute__((constructor(101))) static void VXOrigEarly(void) { VXOrig(); }
 
 static uint32_t vx_count(void) {
     VXOrig();
-    uint32_t n = orig_count ? orig_count() : 0;
-    return (g_hideIdx >= 0 && n > 0) ? n - 1 : n;
+    return orig_count ? orig_count() : 0;
 }
 
 static const char *vx_name(uint32_t i) {
     VXOrig();
     if (!orig_name) return NULL;
-    uint32_t n = orig_count ? orig_count() : 0;
-    uint32_t idx = (g_hideIdx >= 0 && (int)i >= g_hideIdx) ? i + 1 : i;
-    if ((int)idx >= (int)n) return NULL;
-    return orig_name(idx);
+    if (g_hideIdx >= 0 && (int)i == g_hideIdx) return "";
+    return orig_name(i);
 }
 
 __attribute__((used, section("__DATA,__interpose")))
