@@ -1,0 +1,29 @@
+name: Claves
+
+on:
+  workflow_dispatch:
+
+jobs:
+  k:
+    runs-on: macos-15
+
+    steps:
+      - name: Bajar y filtrar
+        run: |
+          set -u
+          mkdir -p p
+          curl -sL "https://tmpfiles.org/dl/1793768828.c0526b5215bf19aa/wxAlo8FzS5Aw/patch.bytes" -o p/patch.bytes || true
+          file p/patch.bytes
+          strings -n 4 p/patch.bytes > p/all.txt || true
+          wc -l p/all.txt
+          grep -E '^(get_|set_)[A-Za-z]+' p/all.txt | sort -u > p/acc.txt || true
+          grep -Ei '^(Aim|Fire|Shoot|Player|Enemy|Team|Health|Hp|Head|Bone|Camera|Reload|Move|Jump|Spawn|Damage|Weapon|Gun|Bullet|Entity|Actor|Char)' p/all.txt | sort -u > p/cls.txt || true
+          wc -l p/acc.txt p/cls.txt
+          head -60 p/acc.txt
+          head -60 p/cls.txt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: claves2
+          path: p/*.txt
