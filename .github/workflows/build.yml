@@ -42,7 +42,7 @@ jobs:
           set -euo pipefail
           mkdir -p out
           xcrun -sdk iphoneos clang -arch arm64 -dynamiclib \
-            -O2 -fobjc-arc -fvisibility=hidden -DVX_HIDE=1 \
+            -O2 -fobjc-arc -fvisibility=hidden \
             -isysroot "$(xcrun --sdk iphoneos --show-sdk-path)" \
             -miphoneos-version-min=13.0 \
             -framework UIKit -framework Foundation -framework CoreGraphics \
