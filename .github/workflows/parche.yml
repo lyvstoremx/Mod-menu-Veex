@@ -34,14 +34,6 @@ jobs:
           $t = $t -replace 'throw "Generated patch is missing required methods[^"]*"', 'Write-Host "faltan metodos"'
           Set-Content build.ps1 $t -NoNewline
 
-      - name: Renombrar ensamblado
-        working-directory: ref
-        shell: powershell
-        run: |
-          $t = Get-Content build.ps1 -Raw
-          $t = $t -replace 'ESPLogic\.dll', 'Assembly-CSharp.dll'
-          Set-Content build.ps1 $t -NoNewline
-
       - name: Elegir compilador
         working-directory: ref
         shell: powershell
