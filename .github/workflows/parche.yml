@@ -115,24 +115,19 @@ jobs:
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 
-      - name: Ver parche
+      - name: Ver flags
         if: always()
         working-directory: ref
         shell: powershell
         run: |
-          foreach ($f in @('dist\Assembly-CSharp-patch.report.json','dist\Assembly-CSharp-patch.verify.json')) {
-            if (-not (Test-Path $f)) { Write-Host "falta $f"; continue }
-            $raw = Get-Content $f -Raw
-            Write-Host "$f -> ProjectEspPatch: $(([regex]::Matches($raw,'ProjectEspPatch')).Count)  Logic: $(([regex]::Matches($raw,'Logic')).Count)"
-            try {
-              $o = $raw | ConvertFrom-Json
-              Write-Host ("claves: " + (($o.PSObject.Properties.Name) -join ','))
-              $o.PSObject.Properties | Where-Object { $_.Name -match 'type|new|class' } | ForEach-Object {
-                Write-Host "-- $($_.Name)"
-                Write-Host (($_.Value | ConvertTo-Json -Depth 4 -Compress))
-              }
-            } catch { Write-Host "no parseable" }
-          }
+          Get-ChildItem -Recurse -Include *.py,*.ps1,*.json,*.yml -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -notmatch '\\(dist|generated)\\' } |
+            Select-String -Pattern 'new_classes|newClasses|new_types|newTypes|anonymous_type' -ErrorAction SilentlyContinue |
+            ForEach-Object { Write-Host "$($_.Path):$($_.LineNumber): $($_.Line.Trim())" }
+          Write-Host "--- archivos de config:"
+          Get-ChildItem -Recurse -Include *.json,*.yml,*.yaml -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -notmatch '\\(dist|generated|node_modules)\\' -and $_.Length -lt 4000 } |
+            ForEach-Object { Write-Host "== $($_.FullName)"; Write-Host (Get-Content $_.FullName -Raw) }
 
       - name: Subir
         uses: actions/upload-artifact@v4
