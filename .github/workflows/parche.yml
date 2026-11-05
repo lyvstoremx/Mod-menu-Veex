@@ -114,7 +114,7 @@ jobs:
             "                    GUI.DrawTexture(new Rect(0f, -1.0f, len, 2.0f), tex);",
             "                    GUI.color = c;",
             "                    GUI.DrawTexture(new Rect(0f, -thick * 0.5f, len, thick), tex);",
-            "                    GUI.matrix = Matrix4x4.Identity;",
+            "                    GUI.matrix = Matrix4x4.identity;",
             "                }",
             "            }",
             "        }",
@@ -170,9 +170,21 @@ jobs:
           assert ancla in s
           s = s.replace(ancla, copiar, 1)
 
-          firma = "        private static MethodReference MapMethod(MethodReference method)\n        {\n"
-          assert firma in s
-          remapeo = "\n".join([
+          firma_tipo = "        private static TypeReference MapType(TypeReference type)\n        {\n"
+          assert firma_tipo in s
+          remapeo_tipo = "\n".join([
+            "            if (type.Namespace != null && type.Namespace.StartsWith(\"ProjectEspPatch\"))",
+            "            {",
+            "                TypeDefinition localType = targetModule.GetType(type.FullName);",
+            "                if (localType != null) return localType;",
+            "            }",
+            ""
+          ])
+          s = s.replace(firma_tipo, firma_tipo + remapeo_tipo, 1)
+
+          firma_metodo = "        private static MethodReference MapMethod(MethodReference method)\n        {\n"
+          assert firma_metodo in s
+          remapeo_metodo = "\n".join([
             "            if (method.DeclaringType.Namespace != null",
             "                && method.DeclaringType.Namespace.StartsWith(\"ProjectEspPatch\"))",
             "            {",
@@ -186,7 +198,7 @@ jobs:
             "            }",
             ""
           ])
-          s = s.replace(firma, firma + remapeo, 1)
+          s = s.replace(firma_metodo, firma_metodo + remapeo_metodo, 1)
 
           ghost = "            TypeDefinition ghostHelperType = helperAssembly.MainModule.GetType(\"ProjectEspPatch.GhostFeature\");\n"
           assert ghost in s
@@ -318,6 +330,7 @@ jobs:
             '      if (!t.FullName.StartsWith("ProjectEspPatch")) continue;',
             '      System.Console.WriteLine("TIPO: [" + t.FullName + "] metodos=" + t.Methods.Count);',
             '    }',
+            '    System.Console.WriteLine("refs: " + string.Join(",", asm.MainModule.AssemblyReferences));',
             '  }',
             '}'
           ) -join "`n"
