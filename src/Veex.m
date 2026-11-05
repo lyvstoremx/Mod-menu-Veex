@@ -293,10 +293,10 @@ static BOOL VXCargar(void) {
 
     void *cls = NULL;
     int total = 0;
-    for (int i = 0; i < 15; i++) {
+    for (int i = 0; i < 90; i++) {
         cls = VXFindPatchClass(&total);
         if (cls) break;
-        VXSay([NSString stringWithFormat:@"2 sin PatchManager | %d/15", i + 1]);
+        VXSay([NSString stringWithFormat:@"2 sin PatchManager | %d/90", i + 1]);
         [NSThread sleepForTimeInterval:1.0];
     }
     if (!cls) { VXSay(@"2 nunca aparecio"); return NO; }
