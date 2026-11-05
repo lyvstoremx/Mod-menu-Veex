@@ -11,6 +11,7 @@
 
 #define VX_HIDE 0
 #define VX_PATCH_URL "https://github.com/lyvstoremx/Mod-menu-Veex/releases/download/base/Assembly-CSharp-patch.bytes"
+#define VX_NEUTRAL_URL "https://raw.githubusercontent.com/ttanhios1602-beep/3105-MENU/master/project-freefire_c%23/baseline/Assembly-CSharp-patch-neutral.bytes"
 
 #pragma mark - il2cpp
 
@@ -36,8 +37,6 @@ typedef void    *(*fn_object_get_class)(void *);
 typedef void    *(*fn_string_new)(const char *);
 typedef uint16_t *(*fn_string_chars)(void *);
 typedef void    *(*fn_value_box)(void *, void *);
-typedef void    *(*fn_array_new)(void *, size_t);
-typedef uint32_t (*fn_array_length)(void *);
 
 static fn_domain_get                 p_dom;
 static fn_thread_attach              p_attach;
@@ -61,8 +60,6 @@ static fn_object_get_class           p_ogc;
 static fn_string_new                 p_snew;
 static fn_string_chars               p_schars;
 static fn_value_box                  p_box;
-static fn_array_new                  p_anew;
-static fn_array_length               p_alen;
 
 static int VXBind(void) {
     if (p_inv) return 1;
@@ -77,7 +74,7 @@ static int VXBind(void) {
     p_asms   = (fn_domain_get_assemblies)dlsym(h, "il2cpp_domain_get_assemblies");
     p_img    = (fn_assembly_get_image)dlsym(h, "il2cpp_assembly_get_image");
     p_iname  = (fn_image_get_name)dlsym(h, "il2cpp_image_get_name");
-    p_icount = (fn_image_class_count)dlsym(h, "il2cpp_image_get_class_count");
+    p_icount = (fn_image_class_count)dlsym(h, "il2cpp_image_class_count");
     p_iget   = (fn_image_get_class)dlsym(h, "il2cpp_image_get_class");
     p_cname  = (fn_class_get_name)dlsym(h, "il2cpp_class_get_name");
     p_cns    = (fn_class_get_namespace)dlsym(h, "il2cpp_class_get_namespace");
@@ -94,12 +91,10 @@ static int VXBind(void) {
     p_snew   = (fn_string_new)dlsym(h, "il2cpp_string_new");
     p_schars = (fn_string_chars)dlsym(h, "il2cpp_string_chars");
     p_box    = (fn_value_box)dlsym(h, "il2cpp_value_box");
-    p_anew   = (fn_array_new)dlsym(h, "il2cpp_array_new");
-    p_alen   = (fn_array_length)dlsym(h, "il2cpp_array_length");
 
     if (!p_dom || !p_asms || !p_img || !p_iname || !p_icount || !p_iget ||
         !p_cname || !p_cns || !p_cfn || !p_cmeth || !p_mname || !p_mpc ||
-        !p_mparam || !p_tname || !p_inv || !p_onew || !p_snew || !p_box || !p_anew) return 0;
+        !p_mparam || !p_tname || !p_inv || !p_onew || !p_snew || !p_box) return 0;
     return 1;
 }
 
@@ -234,15 +229,15 @@ static NSString *VXFindPatch(void) {
     return nil;
 }
 
-static BOOL VXBajar(NSString *dst) {
-    NSURL *u = [NSURL URLWithString:@(VX_PATCH_URL)];
+static BOOL VXBajarUrl(NSString *url, NSString *dst) {
+    NSURL *u = [NSURL URLWithString:url];
     NSMutableURLRequest *r = [NSMutableURLRequest requestWithURL:u];
     r.timeoutInterval = 40;
     __block NSData *out = nil;
     dispatch_semaphore_t sem = dispatch_semaphore_create(0);
     [[NSURLSession sharedSession] dataTaskWithRequest:r
         completionHandler:^(NSData *d, NSURLResponse *resp, NSError *e) {
-            if (!e && d.length > 1024) out = d;
+            if (!e && d.length > 64) out = d;
             dispatch_semaphore_signal(sem);
         }];
     dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(45 * NSEC_PER_SEC)));
@@ -265,7 +260,6 @@ static void *VXStream(NSString *path, NSString **why) {
     void *arr = p_inv(rab, NULL, a1, &exc);
     if (exc) { *why = VXExcMsg(exc); return NULL; }
     if (!arr) { *why = @"sin bytes"; return NULL; }
-    if (p_alen) *why = [NSString stringWithFormat:@"%u bytes", p_alen(arr)];
 
     void *obj = p_onew(msCls);
     if (!obj) { *why = @"sin objeto"; return NULL; }
@@ -278,6 +272,29 @@ static void *VXStream(NSString *path, NSString **why) {
     p_inv(ctor, obj, a2, &exc);
     if (exc) { *why = VXExcMsg(exc); return NULL; }
     return obj;
+}
+
+static BOOL VXProbar(void *m, NSString *path, NSString *eti) {
+    NSData *d = [NSData dataWithContentsOfFile:path];
+    if (!d || d.length < 64) { VXSay([NSString stringWithFormat:@"%@ vacio", eti]); return NO; }
+    const unsigned char *raw = d.bytes;
+    VXSay([NSString stringWithFormat:@"%@ %lu b %02X%02X%02X%02X",
+           eti, (unsigned long)d.length, raw[0], raw[1], raw[2], raw[3]]);
+
+    void *boolCls = VXClass("mscorlib", "System", "Boolean");
+    for (int k = 0; k < 2; k++) {
+        NSString *why = nil;
+        void *stream = VXStream(path, &why);
+        if (!stream) { VXSay([NSString stringWithFormat:@"%@ stream: %@", eti, why]); return NO; }
+        int t = k;
+        void *b = boolCls ? p_box(boolCls, &t) : NULL;
+        void *args[4] = { NULL, NULL, stream, b };
+        void *exc = NULL;
+        p_inv(m, NULL, args, &exc);
+        if (!exc) { VXSay([NSString stringWithFormat:@"OK %@ b%d", eti, t]); VXSay(@"parche cargado"); return YES; }
+        VXSay([NSString stringWithFormat:@"9 %@ b%d: %@", eti, t, VXExcMsg(exc)]);
+    }
+    return NO;
 }
 
 static BOOL VXCargar(void) {
@@ -301,39 +318,16 @@ static BOOL VXCargar(void) {
     if (!m) { VXSay(@"3 sin metodo"); return NO; }
 
     NSString *doc = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
-    NSString *p = VXFindPatch();
-    if (!p) {
-        VXSay(@"4 bajando...");
-        NSString *dst = [doc stringByAppendingPathComponent:@"Assembly-CSharp-patch.bytes"];
-        if (!VXBajar(dst)) { VXSay(@"4 no se pudo bajar"); return NO; }
-        p = dst;
-    }
+    NSString *p1 = [doc stringByAppendingPathComponent:@"vx_nuestro.bytes"];
+    NSString *p2 = [doc stringByAppendingPathComponent:@"vx_neutral.bytes"];
 
-    NSData *d = [NSData dataWithContentsOfFile:p];
-    if (!d || d.length < 1024) { VXSay(@"5 archivo vacio"); return NO; }
-    const unsigned char *raw = d.bytes;
-    VXSay([NSString stringWithFormat:@"5 %lu KB %02X%02X%02X%02X",
-           (unsigned long)(d.length / 1024), raw[0], raw[1], raw[2], raw[3]]);
+    VXSay(@"4 bajando...");
+    BOOL ok1 = VXBajarUrl(@(VX_PATCH_URL), p1);
+    BOOL ok2 = VXBajarUrl(@(VX_NEUTRAL_URL), p2);
+    VXSay([NSString stringWithFormat:@"4 nuestro %d neutral %d", ok1, ok2]);
 
-    NSString *tmp = [doc stringByAppendingPathComponent:@"vxpatch.bytes"];
-    [d writeToFile:tmp atomically:YES];
-
-    void *boolCls = VXClass("mscorlib", "System", "Boolean");
-
-    for (int k = 0; k < 2; k++) {
-        NSString *why = nil;
-        void *stream = VXStream(tmp, &why);
-        if (!stream) { VXSay([NSString stringWithFormat:@"6: %@", why]); return NO; }
-        VXSay([NSString stringWithFormat:@"7 %@", why ? why : @"?"]);
-
-        int t = k;
-        void *b = boolCls ? p_box(boolCls, &t) : NULL;
-        void *args[4] = { NULL, NULL, stream, b };
-        void *exc = NULL;
-        p_inv(m, NULL, args, &exc);
-        if (!exc) { VXSay(@"parche cargado"); return YES; }
-        VXSay([NSString stringWithFormat:@"9 b%d: %@", t, VXExcMsg(exc)]);
-    }
+    if (ok1 && VXProbar(m, p1, @"nuestro")) return YES;
+    if (ok2 && VXProbar(m, p2, @"neutral")) return YES;
     return NO;
 }
 
@@ -548,7 +542,7 @@ static void VXInit(void) {
         for (UIView *panel in v.subviews) {
             for (UIView *s in panel.subviews) {
                 if (s.hidden) continue;
-                CGRect r = [s convertRect:s.bounds toView:self];
+                CGRect r = [s convertRect:s.bounds toView:panel];
                 if (CGRectContainsPoint(r, p)) return YES;
             }
         }
