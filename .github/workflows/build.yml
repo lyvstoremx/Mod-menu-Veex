@@ -61,42 +61,28 @@ jobs:
         run: |
           set -euo pipefail
           EXE="$APP/$(basename "$APP" .app)"
-          ls -la "$APP/Frameworks" || true
-          python3 - "$APP" "$EXE" <<'PY'
-          import lief, os, sys
-          app, exe = sys.argv[1], sys.argv[2]
-          keep = ("libil2cpp", "libmono", "libunity", "libveexcore", "unityframework",
-                  "libswift", "libiphone", "libjs", "libtbb", "libc++")
-          fw = os.path.join(app, "Frameworks")
-          muertos = []
-          if os.path.isdir(fw):
-              for n in sorted(os.listdir(fw)):
-                  if not n.endswith(".dylib"):
-                      continue
-                  if any(k in n.lower() for k in keep):
-                      continue
-                  try:
-                      os.remove(os.path.join(fw, n))
-                      muertos.append(n)
-                  except Exception as e:
-                      print("no borre", n, e)
-          print("dylibs fuera:", muertos)
-          b = lief.parse(exe)
-          for lib in list(b.libraries):
-              base = os.path.basename(lib.name)
-              if base in muertos or "veex" in lib.name.lower():
-                  try:
-                      b.remove_library(lib.name)
-                  except Exception as e:
-                      print("no quite", lib.name, e)
-          b.add_library("@executable_path/Frameworks/libveexcore.dylib")
-          b.write(exe)
-          print("inyectado")
+          rm -f "$APP"/Frameworks/*eex*.dylib
+          python3 - "$EXE" <<'PY'
+          import lief, sys
+          exe = sys.argv[1]
+          for _ in range(8):
+              b = lief.parse(exe)
+              hit = [l.name for l in b.libraries if "veex" in l.name.lower()]
+              print("quedan:", hit)
+              if not hit:
+                  b.add_library("@executable_path/Frameworks/libveexcore.dylib")
+                  b.write(exe)
+                  print("inyectado limpio")
+                  break
+              try:
+                  b.remove_library(hit[0])
+              except Exception as e:
+                  print("no quite", hit[0], e)
+              b.write(exe)
           PY
           mkdir -p "$APP/Frameworks"
           cp out/libveexcore.dylib "$APP/Frameworks/"
           chmod +x "$APP/Frameworks/libveexcore.dylib"
-          ls -la "$APP/Frameworks"
 
       - name: Parche
         env:
