@@ -10,8 +10,6 @@
 #import <stdlib.h>
 
 #define VX_HIDE 0
-#define VX_PATCH_URL "https://github.com/lyvstoremx/Mod-menu-Veex/releases/download/base/Assembly-CSharp-patch.bytes"
-#define VX_NEUTRAL_URL "https://raw.githubusercontent.com/ttanhios1602-beep/3105-MENU/master/project-freefire_c%23/baseline/Assembly-CSharp-patch-neutral.bytes"
 
 #pragma mark - il2cpp
 
@@ -83,8 +81,6 @@ static int VXBind(void) {
     p_asms   = (fn_domain_get_assemblies)VXS(h, "il2cpp_domain_get_assemblies");
     p_img    = (fn_assembly_get_image)VXS(h, "il2cpp_assembly_get_image");
     p_iname  = (fn_image_get_name)VXS(h, "il2cpp_image_get_name");
-    p_icount = (fn_image_class_count)VXS(h, "il2cpp_image_class_count");
-    p_iget   = (fn_image_get_class)VXS(h, "il2cpp_image_get_class");
     p_cname  = (fn_class_get_name)VXS(h, "il2cpp_class_get_name");
     p_cns    = (fn_class_get_namespace)VXS(h, "il2cpp_class_get_namespace");
     p_cfn    = (fn_class_from_name)VXS(h, "il2cpp_class_from_name");
@@ -100,6 +96,9 @@ static int VXBind(void) {
     p_snew   = (fn_string_new)VXS(h, "il2cpp_string_new");
     p_schars = (fn_string_chars)VXS(h, "il2cpp_string_chars");
     p_box    = (fn_value_box)VXS(h, "il2cpp_value_box");
+
+    p_icount = (fn_image_class_count)dlsym(h, "il2cpp_image_class_count");
+    p_iget   = (fn_image_get_class)dlsym(h, "il2cpp_image_get_class");
 
     return g_miss ? 0 : 1;
 }
@@ -127,6 +126,14 @@ static void *VXClass(const char *img, const char *ns, const char *name) {
 static void *VXFindPatchClass(int *total) {
     *total = 0;
     if (!p_dom) return NULL;
+
+    if (!p_icount || !p_iget) {
+        void *im = VXImage("Assembly-CSharp");
+        if (!im) return NULL;
+        *total = 1;
+        return p_cfn(im, "IFix.Core", "PatchManager");
+    }
+
     size_t n = 0;
     void **list = p_asms(p_dom(), &n);
     if (!list) return NULL;
@@ -226,22 +233,6 @@ static void VXSay(NSString *s) {
 }
 
 #pragma mark - parche
-
-static BOOL VXBajarUrl(NSString *url, NSString *dst) {
-    NSURL *u = [NSURL URLWithString:url];
-    NSMutableURLRequest *r = [NSMutableURLRequest requestWithURL:u];
-    r.timeoutInterval = 40;
-    __block NSData *out = nil;
-    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
-    [[NSURLSession sharedSession] dataTaskWithRequest:r
-        completionHandler:^(NSData *d, NSURLResponse *resp, NSError *e) {
-            if (!e && d.length > 64) out = d;
-            dispatch_semaphore_signal(sem);
-        }];
-    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(45 * NSEC_PER_SEC)));
-    if (!out) return NO;
-    return [out writeToFile:dst atomically:YES];
-}
 
 static void *VXStream(NSString *path, NSString **why) {
     *why = nil;
