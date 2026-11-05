@@ -267,26 +267,6 @@ static void *VXNewMem(NSData *d, NSString **why) {
     return obj;
 }
 
-static void *VXNewFile(NSString *path, NSString **why) {
-    *why = nil;
-    void *fsCls = VXClass("mscorlib", "System.IO", "FileStream");
-    if (!fsCls) { *why = @"sin FileStream"; return NULL; }
-    void *obj = p_onew(fsCls);
-    if (!obj) { *why = @"sin objeto"; return NULL; }
-
-    void *ctor = VXMethod(fsCls, ".ctor", 2);
-    if (!ctor) { *why = @"sin ctor"; return NULL; }
-
-    void *exc = NULL;
-    void *args[2] = { p_snew([path UTF8String]), p_box(fsCls, NULL) };
-    int mode = 3;
-    void *modeCls = VXClass("mscorlib", "System.IO", "FileMode");
-    args[1] = modeCls ? p_box(modeCls, &mode) : NULL;
-    p_inv(ctor, obj, args, &exc);
-    if (exc) { *why = VXExcMsg(exc); return NULL; }
-    return obj;
-}
-
 static BOOL VXCargar(void) {
     if (!VXBind()) { VXSay(@"1 sin il2cpp"); return NO; }
     void *dom = p_dom();
@@ -318,34 +298,26 @@ static BOOL VXCargar(void) {
 
     NSData *d = [NSData dataWithContentsOfFile:p];
     if (!d || d.length < 1024) { VXSay(@"5 archivo vacio"); return NO; }
-    VXSay([NSString stringWithFormat:@"5 %lu KB", (unsigned long)(d.length / 1024)]);
-
-    NSString *why = nil;
-    void *stream = VXNewMem(d, &why);
-    if (!stream) {
-        VXSay([NSString stringWithFormat:@"6 mem: %@", why]);
-        stream = VXNewFile(p, &why);
-        if (!stream) { VXSay([NSString stringWithFormat:@"6 file: %@", why]); return NO; }
-    }
-    VXSay(@"7 stream ok");
+    const unsigned char *raw = d.bytes;
+    VXSay([NSString stringWithFormat:@"5 %lu KB %02X%02X%02X%02X",
+           (unsigned long)(d.length / 1024), raw[0], raw[1], raw[2], raw[3]]);
 
     void *boolCls = VXClass("mscorlib", "System", "Boolean");
-    int t = 1;
-    void *bTrue = boolCls ? p_box(boolCls, &t) : NULL;
 
-    void *args[4] = { NULL, NULL, stream, bTrue };
-    void *exc = NULL;
-    p_inv(m, NULL, args, &exc);
-    if (exc) { VXSay([NSString stringWithFormat:@"9 %@", VXExcMsg(exc)]); return NO; }
+    for (int k = 0; k < 2; k++) {
+        NSString *why = nil;
+        void *stream = VXNewMem(d, &why);
+        if (!stream) { VXSay([NSString stringWithFormat:@"6 mem: %@", why]); return NO; }
 
-    VXSay(@"parche cargado");
-    return YES;
-}
-
-static void VXArmPatch(void) {
-    if (g_armed) return;
-    g_armed = 1;
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{ VXCargar(); });
+        int t = k;
+        void *b = boolCls ? p_box(boolCls, &t) : NULL;
+        void *args[4] = { NULL, NULL, stream, b };
+        void *exc = NULL;
+        p_inv(m, NULL, args, &exc);
+        if (!exc) { VXSay(@"parche cargado"); return YES; }
+        VXSay([NSString stringWithFormat:@"9 b%d: %@", t, VXExcMsg(exc)]);
+    }
+    return NO;
 }
 
 static void VXResetGuest(void) {
@@ -530,12 +502,13 @@ static void VXResetGuest(void) {
 static void VXInstall(void) {
     CGRect b = UIScreen.mainScreen.bounds;
     g_win = [[VXWindow alloc] initWithFrame:b];
-    g_win.windowLevel = UIWindowLevelAlert + 1;
+    g_win.windowLevel = UIWindowLevelNormal + 1;
     g_win.backgroundColor = UIColor.clearColor;
     g_win.hidden = NO;
 
     UIViewController *vc = [[UIViewController alloc] init];
     vc.view.backgroundColor = UIColor.clearColor;
+    vc.view.userInteractionEnabled = YES;
     g_win.rootViewController = vc;
 
     VeexPanel *panel = [[VeexPanel alloc] initWithFrame:b];
