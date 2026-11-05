@@ -90,25 +90,27 @@ jobs:
           p = r"src\ESPLogic.template.cs"
           s = open(p, encoding="utf-8").read()
 
-          helper = """        private static void DrawBoneSeg(Vector3 p1, Vector3 p2, Color c, float thick, Texture2D tex, int screenHeight)
-        {
-            if (p1.z > 0f && p2.z > 0f)
-            {
-                float x1 = p1.x, y1 = (float)screenHeight - p1.y, x2 = p2.x, y2 = (float)screenHeight - p2.y;
-                float dx = x2 - x1, dy = y2 - y1, len = Mathf.Sqrt(dx * dx + dy * dy);
-                if (len >= 0.5f)
-                {
-                    GUI.matrix = Matrix4x4.TRS(new Vector3(x1, y1, 0f), Quaternion.Euler(0f, 0f, Mathf.Atan2(dy, dx) * Rad2Deg), Vector3.one);
-                    GUI.color = new Color(c.r, c.g, c.b, 0.3f);
-                    GUI.DrawTexture(new Rect(0f, -1.0f, len, 2.0f), tex);
-                    GUI.color = c;
-                    GUI.DrawTexture(new Rect(0f, -thick * 0.5f, len, thick), tex);
-                    GUI.matrix = Matrix4x4.identity;
-                }
-            }
-        }
-
-        public static bool Bootstrap"""
+          helper = "\n".join([
+            "        private static void DrawBoneSeg(Vector3 p1, Vector3 p2, Color c, float thick, Texture2D tex, int screenHeight)",
+            "        {",
+            "            if (p1.z > 0f && p2.z > 0f)",
+            "            {",
+            "                float x1 = p1.x, y1 = (float)screenHeight - p1.y, x2 = p2.x, y2 = (float)screenHeight - p2.y;",
+            "                float dx = x2 - x1, dy = y2 - y1, len = Mathf.Sqrt(dx * dx + dy * dy);",
+            "                if (len >= 0.5f)",
+            "                {",
+            "                    GUI.matrix = Matrix4x4.TRS(new Vector3(x1, y1, 0f), Quaternion.Euler(0f, 0f, Mathf.Atan2(dy, dx) * Rad2Deg), Vector3.one);",
+            "                    GUI.color = new Color(c.r, c.g, c.b, 0.3f);",
+            "                    GUI.DrawTexture(new Rect(0f, -1.0f, len, 2.0f), tex);",
+            "                    GUI.color = c;",
+            "                    GUI.DrawTexture(new Rect(0f, -thick * 0.5f, len, thick), tex);",
+            "                    GUI.matrix = Matrix4x4.identity;",
+            "                }",
+            "            }",
+            "        }",
+            "",
+            "        public static bool Bootstrap"
+          ])
 
           s = s.replace("\n        public static bool Bootstrap", "\n" + helper, 1)
           s, a = re.subn(r"Action<Vector3, Vector3> DrawBone = \(p1, p2\) => \{.*?\};\n", "", s, flags=re.S)
