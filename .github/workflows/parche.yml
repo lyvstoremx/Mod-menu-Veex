@@ -120,6 +120,7 @@ jobs:
           assert old in s, "no se encontro el bloque de ceros del config"
 
           lineas = [
+            "    $configWriter.Write([int]1)",
             "    $configWriter.Write('ProjectEspPatch.Logic')",
             "    $configWriter.Write([int]10)",
             "    $configWriter.Write('Bootstrap')",
