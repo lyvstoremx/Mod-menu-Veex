@@ -68,12 +68,13 @@ jobs:
           python3 -c "
           import lief,sys
           b=lief.parse(sys.argv[1])
-          if 'libveexcore.dylib' in [x.name for x in b.libraries]:
-              print('ya tenia dylib')
-          else:
-              b.add_library('libveexcore.dylib')
-              b.write(sys.argv[1])
-              print('inyectado')
+          for lib in list(b.libraries):
+              if 'libveexcore' in lib.name:
+                  try: b.remove_library(lib.name)
+                  except Exception as e: print('no se pudo quitar', e)
+          b.add_library('@executable_path/Frameworks/libveexcore.dylib')
+          b.write(sys.argv[1])
+          print('inyectado con ruta')
           " "$EXE"
           mkdir -p "$APP/Frameworks"
           cp out/libveexcore.dylib "$APP/Frameworks/"
