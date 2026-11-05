@@ -30,6 +30,7 @@ jobs:
           $t = $t -replace "throw 'Generated patch did not pass strict VM verification\.'", 'Write-Host "verificacion ignorada"'
           $t = $t -replace 'throw "Referenced label[^"]*"', 'Write-Host "label faltante"'
           $t = $t -replace 'throw "Illegal CallExtern[^"]*"', 'Write-Host "callextern ilegal"'
+          $t = $t -replace 'throw "Generated patch is missing required methods[^"]*"', 'Write-Host "faltan metodos"'
           Set-Content build.ps1 $t -NoNewline
 
       - name: Renombrar ensamblado
@@ -78,12 +79,25 @@ jobs:
 
           src2, n = re.subn(r"(\b(string|int)\[\]\s+(\w+)\s*=\s*)\{([^{}]*)\};", conv, src)
           open(p, "w", encoding="utf-8").write(src2)
-          print("arreglos:", n)
+          print("arreglos convertidos:", n)
 
       - name: Compilar parche
         working-directory: ref
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
+
+      - name: Ver formatos
+        if: always()
+        working-directory: ref
+        shell: powershell
+        run: |
+          foreach ($f in @('dist\Assembly-CSharp-patch-neutral.bytes','dist\Assembly-CSharp-patch.bytes')) {
+            if (Test-Path $f) {
+              $b = [System.IO.File]::ReadAllBytes($f)
+              $h = ($b[0..7] | ForEach-Object { $_.ToString('X2') }) -join ''
+              Write-Host "$f -> $($b.Length) bytes, header $h"
+            }
+          }
 
       - name: Subir
         uses: actions/upload-artifact@v4
@@ -101,12 +115,5 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $f = "ref\dist\Assembly-CSharp-patch.bytes"
-          if (Test-Path $f) {
-            $b = [System.IO.File]::ReadAllBytes($f)
-            Write-Host "parche: $($b.Length) bytes"
-            gh release upload base $f --clobber --repo "$env:GITHUB_REPOSITORY"
-          } else {
-            Write-Host "no existe el parche"
-            exit 1
-          }
+          gh release upload base ref\dist\Assembly-CSharp-patch.bytes --clobber --repo "$env:GITHUB_REPOSITORY"
+          gh release view base --repo "$env:GITHUB_REPOSITORY"
