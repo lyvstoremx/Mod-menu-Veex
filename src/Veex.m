@@ -210,44 +210,61 @@ static BOOL VXBajar(NSString *dst) {
 
 static void *VXNewStream(NSString *path, int *step) {
     *step = 0;
-    void *fsCls  = VXClass("mscorlib", "System.IO", "FileStream");
-    void *intCls = VXClass("mscorlib", "System", "Int32");
-    if (!fsCls)  { *step = 1; return NULL; }
-    if (!intCls) { *step = 2; return NULL; }
+    void *fsCls   = VXClass("mscorlib", "System.IO", "FileStream");
+    void *modeCls = VXClass("mscorlib", "System.IO", "FileMode");
+    void *accCls  = VXClass("mscorlib", "System.IO", "FileAccess");
+    if (!fsCls)   { *step = 1; return NULL; }
+    if (!modeCls) { *step = 2; return NULL; }
+    if (!accCls)  { *step = 3; return NULL; }
 
     void *obj = p_onew(fsCls);
-    if (!obj) { *step = 3; return NULL; }
-
-    void *ctor = NULL;
-    void *it = NULL;
-    while (1) {
-        void *m = p_cmeth(fsCls, &it);
-        if (!m) break;
-        const char *nm = p_mname(m);
-        if (!nm || strcmp(nm, ".ctor") != 0) continue;
-        if (p_mpc(m) != 3) continue;
-        char *a0 = p_tname(p_mparam(m, 0));
-        char *a1 = p_tname(p_mparam(m, 1));
-        char *a2 = p_tname(p_mparam(m, 2));
-        if (a0 && a1 && a2 && strstr(a0, "String") &&
-            strstr(a1, "FileMode") && strstr(a2, "FileAccess")) { ctor = m; break; }
-    }
-    if (!ctor) { *step = 4; return NULL; }
+    if (!obj) { *step = 4; return NULL; }
 
     void *sPath = p_snew([path UTF8String]);
     if (!sPath) { *step = 5; return NULL; }
 
     int mode = 3;
     int acc  = 1;
-    void *bMode = p_box(intCls, &mode);
-    void *bAcc  = p_box(intCls, &acc);
+    void *bMode = p_box(modeCls, &mode);
+    void *bAcc  = p_box(accCls, &acc);
     if (!bMode || !bAcc) { *step = 6; return NULL; }
 
-    void *args[3] = { sPath, bMode, bAcc };
+    void *ctor3 = NULL;
+    void *ctor2 = NULL;
+    void *it = NULL;
+    while (1) {
+        void *m = p_cmeth(fsCls, &it);
+        if (!m) break;
+        const char *nm = p_mname(m);
+        if (!nm || strcmp(nm, ".ctor") != 0) continue;
+        int pc = p_mpc(m);
+        char *a0 = p_tname(p_mparam(m, 0));
+        if (!a0 || !strstr(a0, "String")) continue;
+        if (pc == 3) {
+            char *a1 = p_tname(p_mparam(m, 1));
+            char *a2 = p_tname(p_mparam(m, 2));
+            if (a1 && a2 && strstr(a1, "FileMode") && strstr(a2, "FileAccess")) ctor3 = m;
+        } else if (pc == 2) {
+            char *a1 = p_tname(p_mparam(m, 1));
+            if (a1 && strstr(a1, "FileMode")) ctor2 = m;
+        }
+    }
+
     void *exc = NULL;
-    p_inv(ctor, obj, args, &exc);
-    if (exc) { *step = 7; return NULL; }
-    return obj;
+    if (ctor3) {
+        void *args[3] = { sPath, bMode, bAcc };
+        p_inv(ctor3, obj, args, &exc);
+        if (!exc) return obj;
+    }
+    *step = 7;
+    exc = NULL;
+    if (ctor2) {
+        void *args2[2] = { sPath, bMode };
+        p_inv(ctor2, obj, args2, &exc);
+        if (!exc) return obj;
+    }
+    *step = 8;
+    return NULL;
 }
 
 static BOOL VXCargar(void) {
