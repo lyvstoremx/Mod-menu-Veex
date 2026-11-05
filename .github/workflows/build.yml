@@ -9,7 +9,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Dependencias
-        run: python3 -m pip install --quiet --break-system-packages requests lief
+        run: python3 -m pip install --quiet --break-system-packages lief
 
       - name: Base
         env:
@@ -85,7 +85,11 @@ jobs:
           if [ -f work/Assembly-CSharp-patch.bytes ]; then
             cp work/Assembly-CSharp-patch.bytes "$APP/"
           fi
-          curl -sSL -o "$APP/neutral.bytes" "https://raw.githubusercontent.com/ttanhios1602-beep/3105-MENU/master/project-freefire_c%23/baseline/Assembly-CSharp-patch-neutral.bytes" || true
+          git clone --depth 1 https://github.com/ttanhios1602-beep/3105-MENU.git ref 2>/dev/null || true
+          if [ -f "ref/project-freefire_c#/baseline/Assembly-CSharp-patch-neutral.bytes" ]; then
+            cp "ref/project-freefire_c#/baseline/Assembly-CSharp-patch-neutral.bytes" "$APP/neutral.bytes"
+          fi
+          ls -la "$APP"/*.bytes || true
 
       - name: Firmar
         run: |
