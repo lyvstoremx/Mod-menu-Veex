@@ -115,19 +115,20 @@ jobs:
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 
-      - name: Ver flags
+      - name: Ver generador
         if: always()
         working-directory: ref
         shell: powershell
         run: |
-          Get-ChildItem -Recurse -Include *.py,*.ps1,*.json,*.yml -ErrorAction SilentlyContinue |
+          Write-Host "--- tools:"
+          Get-ChildItem tools -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "$($_.Name) $($_.Length)" }
+          Write-Host "--- scripts llamados desde build.ps1:"
+          Select-String -Path build.ps1 -Pattern '\.py|python' -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "L$($_.LineNumber): $($_.Line.Trim())" }
+          Write-Host "--- escritores:"
+          Get-ChildItem -Recurse -Include *.py -ErrorAction SilentlyContinue |
             Where-Object { $_.FullName -notmatch '\\(dist|generated)\\' } |
-            Select-String -Pattern 'new_classes|newClasses|new_types|newTypes|anonymous_type' -ErrorAction SilentlyContinue |
-            ForEach-Object { Write-Host "$($_.Path):$($_.LineNumber): $($_.Line.Trim())" }
-          Write-Host "--- archivos de config:"
-          Get-ChildItem -Recurse -Include *.json,*.yml,*.yaml -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -notmatch '\\(dist|generated|node_modules)\\' -and $_.Length -lt 4000 } |
-            ForEach-Object { Write-Host "== $($_.FullName)"; Write-Host (Get-Content $_.FullName -Raw) }
+            Select-String -Pattern 'new class|new_class|def write|writer' -ErrorAction SilentlyContinue |
+            ForEach-Object { Write-Host "$($_.Name):$($_.LineNumber): $($_.Line.Trim())" }
 
       - name: Subir
         uses: actions/upload-artifact@v4
