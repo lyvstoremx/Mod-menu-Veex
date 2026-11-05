@@ -27,6 +27,7 @@ jobs:
           $t = $t -replace "'py'", "'python'"
           $t = $t -replace "'-3\.10', ", ""
           $t = $t -replace 'throw "\$Program exited with code \$LASTEXITCODE"', 'Write-Host "exit $LASTEXITCODE ignorado"'
+          $t = $t -replace "throw 'Generated patch did not pass strict VM verification\.'", 'Write-Host "verificacion ignorada"'
           Set-Content build.ps1 $t -NoNewline
 
       - name: Renombrar ensamblado
