@@ -223,12 +223,15 @@ jobs:
         working-directory: ref
         shell: powershell
         run: |
+          Write-Host "--- declaraciones en la fuente generada:"
+          Select-String -Path generated\ESPLogic.cs -Pattern 'namespace |class ' -ErrorAction SilentlyContinue |
+            ForEach-Object { Write-Host "L$($_.LineNumber): $($_.Line.Trim())" }
           $f = 'dist\Assembly-CSharp-patch.report.json'
           if (Test-Path $f) {
             $o = Get-Content $f -Raw | ConvertFrom-Json
-            Write-Host "new_classes: $(@($o.new_classes).Count)"
-            Write-Host "new_methods: $(@($o.new_methods).Count)"
-            Write-Host "anonymous: $($o.anonymous_type_count)"
+            Write-Host "new_classes: $(@($o.new_classes).Count)  new_methods: $(@($o.new_methods).Count)"
+            Write-Host ("metodos nuevos: " + (@($o.new_methods | ForEach-Object { $_.name }) -join ', '))
+            Write-Host ("externos de Logic: " + (@($o.external_methods | Where-Object { $_.declaring_type -like '*Logic*' } | ForEach-Object { $_.name }) -join ', '))
             Write-Host ("clases: " + (@($o.new_classes) -join ' | '))
           } else { Write-Host "sin report" }
 
