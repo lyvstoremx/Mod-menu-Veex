@@ -195,7 +195,7 @@ static NSString *VXExcMsg(void *exc) {
 
 static UIWindow *g_win;
 static UILabel  *g_diag;
-static NSMutableString *g_log;
+static UITextView *g_log;
 static int       g_armed;
 
 @class VeexPanel;
@@ -225,10 +225,12 @@ static VeexPanel *g_panel;
 
 static void VXSay(NSString *s) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (!g_diag) return;
-        if (!g_log) g_log = [NSMutableString new];
-        [g_log appendFormat:@"%@\n", s];
-        g_diag.text = g_log;
+        if (!g_log) return;
+        NSString *t = g_log.text;
+        if (t.length > 2000) t = [t substringFromIndex:t.length - 1600];
+        g_log.text = [NSString stringWithFormat:@"%@%@\n", t, s];
+        NSRange r = NSMakeRange(g_log.text.length, 0);
+        [g_log scrollRangeToVisible:r];
     });
 }
 
@@ -348,6 +350,16 @@ static void VXResetGuest(void) {
 
 @implementation VeexPanel
 
+- (UIView *)hitTest:(CGPoint)p withEvent:(UIEvent *)e {
+    if ([self sobre:p]) return [super hitTest:p withEvent:e];
+    return nil;
+}
+
+- (BOOL)sobre:(CGPoint)p {
+    if (_open) return CGRectContainsPoint(_box.frame, p);
+    return CGRectContainsPoint(_bubble.frame, p);
+}
+
 - (id)initWithFrame:(CGRect)f {
     self = [super initWithFrame:f];
     if (!self) return nil;
@@ -371,7 +383,7 @@ static void VXResetGuest(void) {
     [_bubble addSubview:v];
 
     _box = [[UIView alloc] initWithFrame:CGRectMake(_bx, _by, 250, 0)];
-    _box.backgroundColor = [UIColor colorWithWhite:0 alpha:0.9];
+    _box.backgroundColor = [UIColor colorWithWhite:0 alpha:0.92];
     _box.layer.cornerRadius = 14;
     _box.layer.borderWidth = 1;
     _box.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.18].CGColor;
@@ -432,12 +444,15 @@ static void VXResetGuest(void) {
     [self boton:@"CARGAR PARCHE" r:_btr[0] sel:@selector(parche)];
     [self boton:@"RESET GUEST" r:_btr[1] sel:@selector(reset)];
 
-    g_diag = [[UILabel alloc] initWithFrame:CGRectMake(14, 254, 222, 90)];
-    g_diag.font = [UIFont systemFontOfSize:8];
-    g_diag.textColor = UIColor.yellowColor;
-    g_diag.numberOfLines = 0;
-    g_diag.text = @"";
-    [_box addSubview:g_diag];
+    g_log = [[UITextView alloc] initWithFrame:CGRectMake(10, 250, 230, 96)];
+    g_log.backgroundColor = [UIColor colorWithWhite:1 alpha:0.06];
+    g_log.textColor = UIColor.yellowColor;
+    g_log.font = [UIFont systemFontOfSize:9];
+    g_log.editable = NO;
+    g_log.scrollEnabled = YES;
+    g_log.textContainerInset = UIEdgeInsetsMake(3, 3, 3, 3);
+    g_log.layer.cornerRadius = 6;
+    [_box addSubview:g_log];
 
     UITapGestureRecognizer *t = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(tap:)];
     [self addGestureRecognizer:t];
@@ -463,22 +478,17 @@ static void VXResetGuest(void) {
 - (void)fovMueve:(UISlider *)s { _fovVal.text = [NSString stringWithFormat:@"FOV %d", (int)s.value]; }
 
 - (void)parche {
-    if (g_log) [g_log setString:@""];
+    if (g_log) g_log.text = @"";
     VXSay(@"cargando...");
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{ VXCargar(); });
 }
 
 - (void)reset { VXResetGuest(); }
 
-- (BOOL)sobre:(CGPoint)p {
-    if (_open) return CGRectContainsPoint(_box.frame, p);
-    return CGRectContainsPoint(_bubble.frame, p);
-}
-
 - (void)abrir {
     _open = YES;
     CGFloat w = MIN(250, self.bounds.size.width - 24);
-    _box.frame = CGRectMake(_bx, _by, w, 356);
+    _box.frame = CGRectMake(_bx, _by, w, 358);
     _box.hidden = NO;
     _bubble.hidden = YES;
 }
@@ -516,19 +526,18 @@ static void VXResetGuest(void) {
 #pragma mark - instalar
 
 static void VXInstall(void) {
-    g_game = UIApplication.sharedApplication.keyWindow;
-    CGRect b = UIScreen.mainScreen.bounds;
-    g_win = [[VXWindow alloc] initWithFrame:b];
-    g_win.windowLevel = UIWindowLevelAlert + 5;
-    g_win.backgroundColor = UIColor.clearColor;
-    g_win.hidden = NO;
+    UIWindow *w = nil;
+    for (UIWindow *x in UIApplication.sharedApplication.windows) {
+        if (x.rootViewController && !x.isHidden) { w = x; break; }
+    }
+    if (!w) w = UIApplication.sharedApplication.keyWindow;
+    if (!w) return;
+    g_game = w;
+    g_win = w;
 
-    UIViewController *vc = [[UIViewController alloc] init];
-    vc.view.backgroundColor = UIColor.clearColor;
-    g_win.rootViewController = vc;
-
-    g_panel = [[VeexPanel alloc] initWithFrame:b];
-    [vc.view addSubview:g_panel];
+    g_panel = [[VeexPanel alloc] initWithFrame:w.bounds];
+    g_panel.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    [w addSubview:g_panel];
 }
 
 __attribute__((constructor))
@@ -542,16 +551,4 @@ static void VXInit(void) {
 
 @implementation VXWindow
 - (BOOL)pointInside:(CGPoint)p withEvent:(UIEvent *)e { return YES; }
-
-- (void)sendEvent:(UIEvent *)event {
-    if (event.type == UIEventTypeTouches && g_panel && g_game && g_game != self) {
-        BOOL mio = NO;
-        for (UITouch *t in [event allTouches]) {
-            CGPoint p = [t locationInView:g_panel];
-            if ([g_panel sobre:p]) { mio = YES; break; }
-        }
-        if (!mio) { [g_game sendEvent:event]; return; }
-    }
-    [super sendEvent:event];
-}
 @end
