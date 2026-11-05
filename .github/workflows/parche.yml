@@ -93,6 +93,18 @@ jobs:
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 
+      - name: Ver formatos
+        working-directory: ref
+        shell: powershell
+        run: |
+          foreach ($f in @("baseline\Assembly-CSharp-patch-neutral.bytes","dist\Assembly-CSharp-patch.bytes")) {
+            if (Test-Path $f) {
+              $b = [System.IO.File]::ReadAllBytes($f)
+              $m = -join ($b[0..7] | ForEach-Object { $_.ToString("X2") })
+              Write-Host "$f  $($b.Length)  $m"
+            } else { Write-Host "$f NO EXISTE" }
+          }
+
       - name: Subir
         uses: actions/upload-artifact@v4
         if: always()
