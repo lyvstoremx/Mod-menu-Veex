@@ -29,9 +29,11 @@ jobs:
       - name: Desempaquetar
         run: |
           set -euo pipefail
+          mkdir -p work
           cd work
           unzip -q base.ipa -d app
-          APP=$(ls -d app/Payload/*.app | head -1)
+          cd ..
+          APP=$(ls -d work/app/Payload/*.app | head -1)
           echo "APP=$APP" >> $GITHUB_ENV
           ls "$APP" | head -30
 
