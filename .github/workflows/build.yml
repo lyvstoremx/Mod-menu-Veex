@@ -64,17 +64,17 @@ jobs:
         run: |
           set -euo pipefail
           EXE="$APP/$(basename "$APP" .app)"
-          rm -f "$APP/Frameworks/libveexcore.dylib"
+          rm -f "$APP"/Frameworks/*eex*.dylib
           python3 -c "
           import lief,sys
           b=lief.parse(sys.argv[1])
           for lib in list(b.libraries):
-              if 'libveexcore' in lib.name:
+              if 'veex' in lib.name.lower():
                   try: b.remove_library(lib.name)
                   except Exception as e: print('no se pudo quitar', e)
           b.add_library('@executable_path/Frameworks/libveexcore.dylib')
           b.write(sys.argv[1])
-          print('inyectado con ruta')
+          print('inyectado limpio')
           " "$EXE"
           mkdir -p "$APP/Frameworks"
           cp out/libveexcore.dylib "$APP/Frameworks/"
