@@ -1,76 +1,66 @@
 name: Veex
-on: workflow_dispatch
+
+on:
+  workflow_dispatch:
+
 permissions:
   contents: write
+
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
       - name: Dependencias
-        run: python3 -m pip install --quiet --break-system-packages lief
+        run: python3 -m pip install --quiet --break-system-packages requests lief
 
       - name: Base
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -uo pipefail
+          set -euo pipefail
           mkdir -p work
-          gh release download base -p '*und3fined*.ipa' -D work 2>/dev/null || true
-          F="$(find work -maxdepth 1 -name '*und3fined*.ipa' | head -1)"
-          if [ -n "$F" ]; then mv "$F" work/base.ipa; echo "desde release"; fi
-          if [ ! -s work/base.ipa ] || [ "$(head -c 2 work/base.ipa)" != "PK" ]; then
-            echo "uso Veex54"
-            rm -f work/base.ipa
-            gh release download base -p 'Veex54.ipa' -D work
-            mv work/Veex54.ipa work/base.ipa
-          fi
+          gh release download base --repo "$GITHUB_REPOSITORY" --pattern "*.ipa" --dir work --clobber
+          f=$(ls work/*.ipa | head -1)
+          mv "$f" work/base.ipa
           ls -la work/base.ipa
 
-      - name: Desempacar
+      - name: Desempaquetar
         run: |
           set -euo pipefail
-          cd work && unzip -q base.ipa -d app
-          A="$(find app/Payload -maxdepth 1 -name '*.app' | head -1)"
-          [ -n "$A" ] || { echo "sin .app"; exit 1; }
-          echo "APP=$PWD/$A" >> $GITHUB_ENV
+          cd work
+          unzip -q base.ipa -d app
+          APP=$(ls -d app/Payload/*.app | head -1)
+          echo "APP=$APP" >> $GITHUB_ENV
+          ls "$APP" | head -30
 
-      - name: Compilar
+      - name: Compilar dylib
         run: |
           set -euo pipefail
           mkdir -p out
           xcrun -sdk iphoneos clang -arch arm64 -dynamiclib \
+            -O2 -fobjc-arc -fvisibility=hidden -DVX_HIDE=1 \
             -isysroot "$(xcrun --sdk iphoneos --show-sdk-path)" \
-            -miphoneos-version-min=15.0 \
-            -framework Foundation -framework UIKit \
-            -framework QuartzCore -framework CoreGraphics \
-            -framework CoreFoundation -framework Security \
+            -miphoneos-version-min=13.0 \
+            -framework UIKit -framework Foundation -framework CoreGraphics \
+            -framework Security -framework QuartzCore \
             -install_name @executable_path/Frameworks/libveexcore.dylib \
             -o out/libveexcore.dylib src/Veex.m
           xcrun -sdk iphoneos strip -x out/libveexcore.dylib
+          ls -la out/
 
       - name: Inyectar
         run: |
           set -euo pipefail
-          EXE="$APP/$(basename "$APP" .app)"
-          rm -f "$APP"/Frameworks/*eex*.dylib
-          python3 - "$EXE" <<'PY'
-          import lief, sys
-          exe = sys.argv[1]
-          for _ in range(8):
-              b = lief.parse(exe)
-              hit = [l.name for l in b.libraries if "veex" in l.name.lower()]
-              if not hit:
-                  b.add_library("@executable_path/Frameworks/libveexcore.dylib")
-                  b.write(exe)
-                  print("inyectado limpio")
-                  break
-              try:
-                  b.remove_library(hit[0])
-              except Exception as e:
-                  print("no quite", hit[0], e)
-              b.write(exe)
+          python3 - <<'PY'
+          import lief, os
+          app = os.environ["APP"]
+          exe = os.path.join(app, os.path.basename(app).replace(".app", ""))
+          bin_ = lief.parse(exe)
+          bin_.add_library("@executable_path/Frameworks/libveexcore.dylib")
+          bin_.write(exe)
+          print("LC_LOAD_DYLIB añadido")
           PY
           mkdir -p "$APP/Frameworks"
           cp out/libveexcore.dylib "$APP/Frameworks/"
@@ -80,32 +70,34 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -uo pipefail
-          gh release download base -p 'Assembly-CSharp-patch.bytes' -D work 2>/dev/null || true
-          if [ -f work/Assembly-CSharp-patch.bytes ]; then
-            cp work/Assembly-CSharp-patch.bytes "$APP/"
-          fi
-          git clone --depth 1 https://github.com/ttanhios1602-beep/3105-MENU.git ref 2>/dev/null || true
-          N="$(find ref -name '*neutral*.bytes' 2>/dev/null | head -1)"
-          echo "neutral: $N"
-          if [ -n "$N" ]; then cp "$N" "$APP/neutral.bytes"; fi
-          ls -la "$APP"/*.bytes || true
+          set -euo pipefail
+          gh release download base --repo "$GITHUB_REPOSITORY" --pattern "Assembly-CSharp-patch.bytes" --dir work --clobber
+          cp work/Assembly-CSharp-patch.bytes "$APP/veexpatch.bin"
+          ls -la "$APP/veexpatch.bin"
 
       - name: Firmar
         run: |
           set -euo pipefail
           rm -rf "$APP/_CodeSignature"
-          codesign --force --sign - "$APP/Frameworks/libveexcore.dylib"
-          codesign --force --sign - "$APP"
+          if [ -d "$APP/Frameworks" ]; then
+            find "$APP/Frameworks" -maxdepth 1 -type f -name "*.dylib" \
+              -exec codesign --force --sign - {} \;
+          fi
+          codesign --force --sign - --timestamp=none "$APP"
+          codesign -dv "$APP" 2>&1 | head -5
 
       - name: Empaquetar
         run: |
           set -euo pipefail
-          cd work/app && zip -qry ../../Veex.ipa Payload
+          cd work/app
+          zip -qry ../../Veex.ipa Payload
           cd ../..
+          unzip -l Veex.ipa | head -12
           ls -la Veex.ipa
 
       - name: Publicar
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload base Veex.ipa --clobber
+        run: |
+          gh release upload base Veex.ipa --clobber --repo "$GITHUB_REPOSITORY"
+          gh release view base --repo "$GITHUB_REPOSITORY"
