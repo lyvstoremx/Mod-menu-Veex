@@ -1,4 +1,52 @@
-- name: Inyectar
+name: Veex
+
+on: workflow_dispatch
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Base
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p work
+          gh release download base -p 'Veex54.ipa' -D work
+          mv work/Veex54.ipa work/base.ipa
+          [ "$(head -c 2 work/base.ipa)" = "PK" ] || { echo "base invalida"; exit 1; }
+
+      - name: Dependencias
+        run: python3 -m pip install --quiet --break-system-packages lief
+
+      - name: Desempacar
+        run: |
+          set -euo pipefail
+          cd work && unzip -q base.ipa -d app
+          A="$(find app/Payload -maxdepth 1 -name '*.app' | head -1)"
+          [ -n "$A" ] || { echo "sin .app"; exit 1; }
+          echo "APP=$PWD/$A" >> $GITHUB_ENV
+
+      - name: Compilar
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          xcrun -sdk iphoneos clang -arch arm64 -dynamiclib \
+            -isysroot "$(xcrun --sdk iphoneos --show-sdk-path)" \
+            -miphoneos-version-min=15.0 \
+            -framework Foundation -framework UIKit \
+            -framework QuartzCore -framework CoreGraphics \
+            -framework CoreFoundation -framework Security \
+            -install_name @executable_path/Frameworks/libveexcore.dylib \
+            -o out/libveexcore.dylib src/Veex.m
+          xcrun -sdk iphoneos strip -x out/libveexcore.dylib
+
+      - name: Inyectar
         run: |
           set -euo pipefail
           EXE="$APP/$(basename "$APP" .app)"
@@ -42,7 +90,8 @@
                       if base in muertos or "veex" in l.name.lower():
                           hit.append(l.name)
                       elif base.endswith(".dylib") and not l.name.startswith("/usr/lib") \
-                           and not l.name.startswith("/System") and not any(k in base.lower() for k in keep):
+                           and not l.name.startswith("/System") \
+                           and not any(k in base.lower() for k in keep):
                           hit.append(l.name)
                   print("  quitar:", hit)
                   if not hit:
@@ -61,3 +110,32 @@
           cp out/libveexcore.dylib "$APP/Frameworks/"
           chmod +x "$APP/Frameworks/libveexcore.dylib"
           ls -la "$APP/Frameworks/UnityFramework.framework" | head -30
+
+      - name: Parche
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          gh release download base -p 'Assembly-CSharp-patch.bytes' -D work 2>/dev/null || true
+          if [ -f work/Assembly-CSharp-patch.bytes ]; then
+            cp work/Assembly-CSharp-patch.bytes "$APP/"
+          fi
+
+      - name: Firmar
+        run: |
+          set -euo pipefail
+          rm -rf "$APP/_CodeSignature"
+          codesign --force --sign - "$APP/Frameworks/libveexcore.dylib"
+          codesign --force --sign - "$APP"
+
+      - name: Empaquetar
+        run: |
+          set -euo pipefail
+          cd work/app && zip -qry ../../Veex.ipa Payload
+          cd ../..
+          ls -la Veex.ipa
+
+      - name: Publicar
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload base Veex.ipa --clobber
