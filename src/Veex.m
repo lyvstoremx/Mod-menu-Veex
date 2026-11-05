@@ -126,8 +126,8 @@ static void *VXClass(const char *img, const char *ns, const char *name) {
 static void *VXFindPatchClass(int *total) {
     *total = 0;
     if (!p_dom) return NULL;
-    const char *imgs[] = {"Assembly-CSharp", "Assembly-CSharp-firstpass", "IFix.Core", "mscorlib"};
-    for (int i = 0; i < 4; i++) {
+    const char *imgs[] = {"IFix.Core", "Assembly-CSharp", "mscorlib"};
+    for (int i = 0; i < 3; i++) {
         void *im = VXImage(imgs[i]);
         if (!im) continue;
         void *c = p_cfn(im, "IFix.Core", "PatchManager");
@@ -277,15 +277,8 @@ static BOOL VXCargar(void) {
     void *dom = p_dom();
     if (dom && p_attach) p_attach(dom);
 
-    void *cls = NULL;
-    int total = 0;
-    for (int i = 0; i < 90; i++) {
-        cls = VXFindPatchClass(&total);
-        if (cls) break;
-        VXSay([NSString stringWithFormat:@"2 sin PatchManager | %d/90 | %d", i + 1, total]);
-        [NSThread sleepForTimeInterval:1.0];
-    }
-    if (!cls) { VXSay(@"2 nunca aparecio"); return NO; }
+    void *cls = VXFindPatchClass(NULL);
+    if (!cls) { VXSay(@"2 sin PatchManager"); return NO; }
 
     void *m = VXMethod(cls, "OptimizeLoad", 4);
     if (!m) m = VXMethod(cls, "Load", 2);
@@ -302,49 +295,6 @@ static BOOL VXCargar(void) {
     if (VXProbar(m, p1, @"nuestro")) return YES;
     if (VXProbar(m, p2, @"neutral")) return YES;
     return NO;
-}
-
-static void VXDump(void) {
-    VXSay(@"=== VOLCADO ===");
-    if (!VXBind()) VXSay([NSString stringWithFormat:@"bind fallo: %s", g_miss ? g_miss : "?"]);
-    VXSay([NSString stringWithFormat:@"sym icount=%d iget=%d", p_icount ? 1 : 0, p_iget ? 1 : 0]);
-    if (!p_dom) { VXSay(@"sin domain"); return; }
-    if (p_attach) p_attach(p_dom());
-    size_t n = 0;
-    void **l = p_asms(p_dom(), &n);
-    VXSay([NSString stringWithFormat:@"ensamblados: %zu", n]);
-    if (!l) return;
-    for (size_t i = 0; i < n && i < 40; i++) {
-        void *im = p_img(l[i]);
-        if (!im) continue;
-        const char *nm = p_iname(im);
-        VXSay([NSString stringWithFormat:@"img %zu %s", i, nm ? nm : "?"]);
-    }
-    int hits = 0;
-    for (size_t i = 0; i < n; i++) {
-        void *im = p_img(l[i]);
-        if (!im) continue;
-        void *c = p_cfn(im, "IFix.Core", "PatchManager");
-        if (!c) c = p_cfn(im, "", "PatchManager");
-        if (!c) continue;
-        hits++;
-        VXSay([NSString stringWithFormat:@"HIT img %zu", i]);
-        void *it = NULL;
-        int k = 0;
-        while (k < 10) {
-            void *m = p_cmeth(c, &it);
-            if (!m) break;
-            const char *mn = p_mname(m);
-            char *a0 = p_mpc(m) > 0 ? p_tname(p_mparam(m, 0)) : "";
-            char *a1 = p_mpc(m) > 1 ? p_tname(p_mparam(m, 1)) : "";
-            char *a2 = p_mpc(m) > 2 ? p_tname(p_mparam(m, 2)) : "";
-            char *a3 = p_mpc(m) > 3 ? p_tname(p_mparam(m, 3)) : "";
-            VXSay([NSString stringWithFormat:@"m %s(%s,%s,%s,%s)", mn ? mn : "?", a0, a1, a2, a3]);
-            k++;
-        }
-    }
-    VXSay([NSString stringWithFormat:@"clases: %d", hits]);
-    VXSay(@"=== FIN ===");
 }
 
 static void VXResetGuest(void) {
@@ -567,7 +517,10 @@ static void VXInstall(void) {
     [w addSubview:g_panel];
 
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(), ^{ VXDump(); });
+                   dispatch_get_main_queue(), ^{
+        [g_panel abrir];
+        VXCargar();
+    });
 }
 
 __attribute__((constructor))
