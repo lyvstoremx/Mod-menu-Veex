@@ -110,25 +110,126 @@ jobs:
           open(p, "w", encoding="utf-8").write(s)
           print("lambda quitado:", a, "llamadas cambiadas:", b)
 
+      - name: Declarar tipos nuevos en el config
+        working-directory: ref
+        shell: python
+        run: |
+          p = "build.ps1"
+          s = open(p, encoding="utf-8").read()
+          old = "    for ($index = 0; $index -lt 4; $index++) {\n        $configWriter.Write([int]0)\n    }"
+          assert old in s, "no se encontro el bloque de ceros del config"
+
+          lineas = [
+            "    $configWriter.Write('ProjectEspPatch.Logic')",
+            "    $configWriter.Write([int]10)",
+            "    $configWriter.Write('Bootstrap')",
+            "    $configWriter.Write('System.Boolean')",
+            "    $configWriter.Write([int]1)",
+            "    $configWriter.Write([bool]$false)",
+            "    $configWriter.Write('COW.GamePlay.Player')",
+            "    $configWriter.Write('Draw')",
+            "    $configWriter.Write('System.Void')",
+            "    $configWriter.Write([int]1)",
+            "    $configWriter.Write([bool]$false)",
+            "    $configWriter.Write('COW.GamePlay.SceneEditBoxSelectTool')",
+            "    $configWriter.Write('SilentAim')",
+            "    $configWriter.Write('COW.GamePlay.' + [string]$bindingInfo.placeholders.AIM_INFO_TYPE)",
+            "    $configWriter.Write([int]1)",
+            "    $configWriter.Write([bool]$false)",
+            "    $configWriter.Write('COW.GamePlay.Player')",
+            "    $configWriter.Write('AimSystem')",
+            "    $configWriter.Write('System.Boolean')",
+            "    $configWriter.Write([int]1)",
+            "    $configWriter.Write([bool]$false)",
+            "    $configWriter.Write('COW.GamePlay.Player')",
+            "    $configWriter.Write('ScatterRate')",
+            "    $configWriter.Write('System.Single')",
+            "    $configWriter.Write([int]1)",
+            "    $configWriter.Write([bool]$false)",
+            "    $configWriter.Write('COW.GamePlay.PlayerAttributes')",
+            "    $configWriter.Write('DrawBoneSeg')",
+            "    $configWriter.Write('System.Void')",
+            "    $configWriter.Write([int]6)",
+            "    $configWriter.Write([bool]$false)",
+            "    $configWriter.Write('UnityEngine.Vector3')",
+            "    $configWriter.Write([bool]$false)",
+            "    $configWriter.Write('UnityEngine.Vector3')",
+            "    $configWriter.Write([bool]$false)",
+            "    $configWriter.Write('UnityEngine.Color')",
+            "    $configWriter.Write([bool]$false)",
+            "    $configWriter.Write('System.Single')",
+            "    $configWriter.Write([bool]$false)",
+            "    $configWriter.Write('UnityEngine.Texture2D')",
+            "    $configWriter.Write([bool]$false)",
+            "    $configWriter.Write('System.Int32')",
+            "    $configWriter.Write('GetRoundedTex')",
+            "    $configWriter.Write('UnityEngine.Texture2D')",
+            "    $configWriter.Write([int]0)",
+            "    $configWriter.Write('DrawModernToggle')",
+            "    $configWriter.Write('System.Void')",
+            "    $configWriter.Write([int]3)",
+            "    $configWriter.Write([bool]$false)",
+            "    $configWriter.Write('UnityEngine.Rect')",
+            "    $configWriter.Write([bool]$false)",
+            "    $configWriter.Write('System.Boolean')",
+            "    $configWriter.Write([bool]$false)",
+            "    $configWriter.Write('UnityEngine.Color')",
+            "    $configWriter.Write('DrawModernSlider')",
+            "    $configWriter.Write('System.Void')",
+            "    $configWriter.Write([int]3)",
+            "    $configWriter.Write([bool]$false)",
+            "    $configWriter.Write('UnityEngine.Rect')",
+            "    $configWriter.Write([bool]$false)",
+            "    $configWriter.Write('System.Single')",
+            "    $configWriter.Write([bool]$false)",
+            "    $configWriter.Write('UnityEngine.Color')",
+            "    $configWriter.Write('DrawText')",
+            "    $configWriter.Write('System.Void')",
+            "    $configWriter.Write([int]6)",
+            "    $configWriter.Write([bool]$false)",
+            "    $configWriter.Write('UnityEngine.Rect')",
+            "    $configWriter.Write([bool]$false)",
+            "    $configWriter.Write('System.String')",
+            "    $configWriter.Write([bool]$false)",
+            "    $configWriter.Write('UnityEngine.Color')",
+            "    $configWriter.Write([bool]$false)",
+            "    $configWriter.Write('System.Int32')",
+            "    $configWriter.Write([bool]$false)",
+            "    $configWriter.Write('UnityEngine.TextAnchor')",
+            "    $configWriter.Write([bool]$false)",
+            "    $configWriter.Write('System.Boolean')",
+            "    $configWriter.Write([int]1)",
+            "    $configWriter.Write('ProjectEspPatch.Logic')",
+            "    $configWriter.Write([int]1)",
+            "    $configWriter.Write('_roundedTex')",
+            "    $configWriter.Write('UnityEngine.Texture2D')",
+            "    $configWriter.Write([int]0)",
+            "    $configWriter.Write([int]1)",
+            "    $configWriter.Write('ProjectEspPatch.Logic')"
+          ]
+
+          s = s.replace(old, "\n".join(lineas), 1)
+          open(p, "w", encoding="utf-8").write(s)
+          print("config ampliado con metodos, campos y clase nueva")
+
       - name: Compilar parche
         working-directory: ref
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 
-      - name: Ver opciones
+      - name: Ver parche
         if: always()
         working-directory: ref
         shell: powershell
         run: |
-          Write-Host "--- opciones de update_from_dump.py:"
-          Select-String -Path tools\update_from_dump.py -Pattern 'add_argument' -Context 0,2 -ErrorAction SilentlyContinue |
-            ForEach-Object { Write-Host $_.Line.Trim(); foreach ($c in $_.Context.PostContext) { Write-Host ("   " + $c.Trim()) } }
-          Write-Host "--- menciones de clase nueva en el generador:"
-          Select-String -Path tools\update_from_dump.py -Pattern 'new_class|new type|newtype|class_count' -ErrorAction SilentlyContinue |
-            ForEach-Object { Write-Host "L$($_.LineNumber): $($_.Line.Trim())" }
-          Write-Host "--- build.ps1 45 a 80:"
-          $bp = Get-Content build.ps1
-          for ($i = 44; $i -lt 80; $i++) { if ($i -lt $bp.Count) { Write-Host "L$($i+1): $($bp[$i])" } }
+          $f = 'dist\Assembly-CSharp-patch.report.json'
+          if (Test-Path $f) {
+            $o = Get-Content $f -Raw | ConvertFrom-Json
+            Write-Host "new_classes: $(@($o.new_classes).Count)"
+            Write-Host "new_methods: $(@($o.new_methods).Count)"
+            Write-Host "anonymous: $($o.anonymous_type_count)"
+            Write-Host ("clases: " + (@($o.new_classes) -join ' | '))
+          } else { Write-Host "sin report" }
 
       - name: Subir
         uses: actions/upload-artifact@v4
