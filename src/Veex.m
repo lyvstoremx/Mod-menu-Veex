@@ -25,14 +25,18 @@ typedef const char *(*fn_class_get_name)(void *);
 typedef const char *(*fn_class_get_namespace)(void *);
 typedef void    *(*fn_class_from_name)(void *, const char *, const char *);
 typedef void    *(*fn_class_get_methods)(void *, void **);
+typedef void    *(*fn_class_get_method_from_name)(void *, const char *, int);
 typedef void    *(*fn_method_get_name)(void *);
 typedef int      (*fn_method_get_param_count)(void *);
 typedef void    *(*fn_method_get_param)(void *, int);
 typedef char    *(*fn_type_get_name)(void *);
 typedef void    *(*fn_runtime_invoke)(void *, void *, void **, void **);
 typedef void    *(*fn_object_new)(void *);
+typedef void    *(*fn_object_get_class)(void *);
 typedef void    *(*fn_string_new)(const char *);
+typedef uint16_t *(*fn_string_chars)(void *);
 typedef void    *(*fn_value_box)(void *, void *);
+typedef void    *(*fn_array_new)(void *, size_t);
 
 static fn_domain_get                 p_dom;
 static fn_thread_attach              p_attach;
@@ -45,14 +49,18 @@ static fn_class_get_name             p_cname;
 static fn_class_get_namespace        p_cns;
 static fn_class_from_name            p_cfn;
 static fn_class_get_methods          p_cmeth;
+static fn_class_get_method_from_name p_cmn;
 static fn_method_get_name            p_mname;
 static fn_method_get_param_count     p_mpc;
 static fn_method_get_param           p_mparam;
 static fn_type_get_name              p_tname;
 static fn_runtime_invoke             p_inv;
 static fn_object_new                 p_onew;
+static fn_object_get_class           p_ogc;
 static fn_string_new                 p_snew;
+static fn_string_chars               p_schars;
 static fn_value_box                  p_box;
+static fn_array_new                  p_anew;
 
 static int VXBind(void) {
     if (p_inv) return 1;
@@ -73,18 +81,22 @@ static int VXBind(void) {
     p_cns    = (fn_class_get_namespace)dlsym(h, "il2cpp_class_get_namespace");
     p_cfn    = (fn_class_from_name)dlsym(h, "il2cpp_class_from_name");
     p_cmeth  = (fn_class_get_methods)dlsym(h, "il2cpp_class_get_methods");
+    p_cmn    = (fn_class_get_method_from_name)dlsym(h, "il2cpp_class_get_method_from_name");
     p_mname  = (fn_method_get_name)dlsym(h, "il2cpp_method_get_name");
     p_mpc    = (fn_method_get_param_count)dlsym(h, "il2cpp_method_get_param_count");
     p_mparam = (fn_method_get_param)dlsym(h, "il2cpp_method_get_param");
     p_tname  = (fn_type_get_name)dlsym(h, "il2cpp_type_get_name");
     p_inv    = (fn_runtime_invoke)dlsym(h, "il2cpp_runtime_invoke");
     p_onew   = (fn_object_new)dlsym(h, "il2cpp_object_new");
+    p_ogc    = (fn_object_get_class)dlsym(h, "il2cpp_object_get_class");
     p_snew   = (fn_string_new)dlsym(h, "il2cpp_string_new");
+    p_schars = (fn_string_chars)dlsym(h, "il2cpp_string_chars");
     p_box    = (fn_value_box)dlsym(h, "il2cpp_value_box");
+    p_anew   = (fn_array_new)dlsym(h, "il2cpp_array_new");
 
     if (!p_dom || !p_asms || !p_img || !p_iname || !p_icount || !p_iget ||
         !p_cname || !p_cns || !p_cfn || !p_cmeth || !p_mname || !p_mpc ||
-        !p_mparam || !p_tname || !p_inv || !p_onew || !p_snew || !p_box) return 0;
+        !p_mparam || !p_tname || !p_inv || !p_onew || !p_snew || !p_box || !p_anew) return 0;
     return 1;
 }
 
@@ -143,6 +155,29 @@ static void *VXMethod(void *cls, const char *name, int argc) {
         return m;
     }
     return NULL;
+}
+
+static NSString *VXExcMsg(void *exc) {
+    if (!exc) return @"?";
+    if (p_ogc && p_cmn && p_inv && p_schars) {
+        void *c = p_ogc(exc);
+        void *m = p_cmn(c, "get_Message", 0);
+        if (m) {
+            void *e2 = NULL;
+            void *r = p_inv(m, exc, NULL, &e2);
+            if (r) {
+                uint16_t *ch = p_schars(r);
+                if (ch) {
+                    char buf[200];
+                    int i = 0;
+                    for (; i < 190 && ch[i]; i++) buf[i] = (char)(ch[i] & 0xFF);
+                    buf[i] = 0;
+                    if (i > 0) return [NSString stringWithUTF8String:buf];
+                }
+            }
+        }
+    }
+    return @"?";
 }
 
 #pragma mark - ui
@@ -208,63 +243,48 @@ static BOOL VXBajar(NSString *dst) {
     return [out writeToFile:dst atomically:YES];
 }
 
-static void *VXNewStream(NSString *path, int *step) {
-    *step = 0;
-    void *fsCls   = VXClass("mscorlib", "System.IO", "FileStream");
-    void *modeCls = VXClass("mscorlib", "System.IO", "FileMode");
-    void *accCls  = VXClass("mscorlib", "System.IO", "FileAccess");
-    if (!fsCls)   { *step = 1; return NULL; }
-    if (!modeCls) { *step = 2; return NULL; }
-    if (!accCls)  { *step = 3; return NULL; }
+static void *VXNewMem(NSData *d, NSString **why) {
+    *why = nil;
+    void *msCls   = VXClass("mscorlib", "System.IO", "MemoryStream");
+    void *byteCls = VXClass("mscorlib", "System", "Byte");
+    if (!msCls)   { *why = @"sin MemoryStream"; return NULL; }
+    if (!byteCls) { *why = @"sin Byte"; return NULL; }
 
-    void *obj = p_onew(fsCls);
-    if (!obj) { *step = 4; return NULL; }
+    void *arr = p_anew(byteCls, (size_t)d.length);
+    if (!arr) { *why = @"sin arreglo"; return NULL; }
+    memcpy((char *)arr + 0x20, d.bytes, d.length);
 
-    void *sPath = p_snew([path UTF8String]);
-    if (!sPath) { *step = 5; return NULL; }
+    void *obj = p_onew(msCls);
+    if (!obj) { *why = @"sin objeto"; return NULL; }
 
-    int mode = 3;
-    int acc  = 1;
-    void *bMode = p_box(modeCls, &mode);
-    void *bAcc  = p_box(accCls, &acc);
-    if (!bMode || !bAcc) { *step = 6; return NULL; }
-
-    void *ctor3 = NULL;
-    void *ctor2 = NULL;
-    void *it = NULL;
-    while (1) {
-        void *m = p_cmeth(fsCls, &it);
-        if (!m) break;
-        const char *nm = p_mname(m);
-        if (!nm || strcmp(nm, ".ctor") != 0) continue;
-        int pc = p_mpc(m);
-        char *a0 = p_tname(p_mparam(m, 0));
-        if (!a0 || !strstr(a0, "String")) continue;
-        if (pc == 3) {
-            char *a1 = p_tname(p_mparam(m, 1));
-            char *a2 = p_tname(p_mparam(m, 2));
-            if (a1 && a2 && strstr(a1, "FileMode") && strstr(a2, "FileAccess")) ctor3 = m;
-        } else if (pc == 2) {
-            char *a1 = p_tname(p_mparam(m, 1));
-            if (a1 && strstr(a1, "FileMode")) ctor2 = m;
-        }
-    }
+    void *ctor = VXMethod(msCls, ".ctor", 1);
+    if (!ctor) { *why = @"sin ctor"; return NULL; }
 
     void *exc = NULL;
-    if (ctor3) {
-        void *args[3] = { sPath, bMode, bAcc };
-        p_inv(ctor3, obj, args, &exc);
-        if (!exc) return obj;
-    }
-    *step = 7;
-    exc = NULL;
-    if (ctor2) {
-        void *args2[2] = { sPath, bMode };
-        p_inv(ctor2, obj, args2, &exc);
-        if (!exc) return obj;
-    }
-    *step = 8;
-    return NULL;
+    void *args[1] = { arr };
+    p_inv(ctor, obj, args, &exc);
+    if (exc) { *why = VXExcMsg(exc); return NULL; }
+    return obj;
+}
+
+static void *VXNewFile(NSString *path, NSString **why) {
+    *why = nil;
+    void *fsCls = VXClass("mscorlib", "System.IO", "FileStream");
+    if (!fsCls) { *why = @"sin FileStream"; return NULL; }
+    void *obj = p_onew(fsCls);
+    if (!obj) { *why = @"sin objeto"; return NULL; }
+
+    void *ctor = VXMethod(fsCls, ".ctor", 2);
+    if (!ctor) { *why = @"sin ctor"; return NULL; }
+
+    void *exc = NULL;
+    void *args[2] = { p_snew([path UTF8String]), p_box(fsCls, NULL) };
+    int mode = 3;
+    void *modeCls = VXClass("mscorlib", "System.IO", "FileMode");
+    args[1] = modeCls ? p_box(modeCls, &mode) : NULL;
+    p_inv(ctor, obj, args, &exc);
+    if (exc) { *why = VXExcMsg(exc); return NULL; }
+    return obj;
 }
 
 static BOOL VXCargar(void) {
@@ -277,46 +297,46 @@ static BOOL VXCargar(void) {
     for (int i = 0; i < 15; i++) {
         cls = VXFindPatchClass(&total);
         if (cls) break;
-        VXSay([NSString stringWithFormat:@"2 sin PatchManager | ens %d | %d/15", total, i + 1]);
+        VXSay([NSString stringWithFormat:@"2 sin PatchManager | %d/15", i + 1]);
         [NSThread sleepForTimeInterval:1.0];
     }
-    if (!cls) { VXSay([NSString stringWithFormat:@"2 nunca aparecio | ens %d", total]); return NO; }
+    if (!cls) { VXSay(@"2 nunca aparecio"); return NO; }
 
     void *m = VXMethod(cls, "OptimizeLoad", 4);
     if (!m) m = VXMethod(cls, "Load", 2);
     if (!m) m = VXMethod(cls, "Load", 1);
-    if (!m) { VXSay(@"3 sin metodo de carga"); return NO; }
-    VXSay(@"3 metodo ok");
+    if (!m) { VXSay(@"3 sin metodo"); return NO; }
 
     NSString *p = VXFindPatch();
     if (!p) {
-        VXSay(@"4 bajando parche...");
+        VXSay(@"4 bajando...");
         NSString *dst = [[NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject]
                          stringByAppendingPathComponent:@"Assembly-CSharp-patch.bytes"];
         if (!VXBajar(dst)) { VXSay(@"4 no se pudo bajar"); return NO; }
         p = dst;
     }
 
-    NSDictionary *at = [[NSFileManager defaultManager] attributesOfItemAtPath:p error:nil];
-    VXSay([NSString stringWithFormat:@"5 archivo %lu KB", (unsigned long)(at.fileSize / 1024)]);
+    NSData *d = [NSData dataWithContentsOfFile:p];
+    if (!d || d.length < 1024) { VXSay(@"5 archivo vacio"); return NO; }
+    VXSay([NSString stringWithFormat:@"5 %lu KB", (unsigned long)(d.length / 1024)]);
 
-    int step = 0;
-    void *stream = VXNewStream(p, &step);
+    NSString *why = nil;
+    void *stream = VXNewMem(d, &why);
     if (!stream) {
-        VXSay([NSString stringWithFormat:@"6 fallo stream (%d)", step]);
-        return NO;
+        VXSay([NSString stringWithFormat:@"6 mem: %@", why]);
+        stream = VXNewFile(p, &why);
+        if (!stream) { VXSay([NSString stringWithFormat:@"6 file: %@", why]); return NO; }
     }
-    VXSay(@"7 stream listo");
+    VXSay(@"7 stream ok");
 
     void *boolCls = VXClass("mscorlib", "System", "Boolean");
-    if (!boolCls) { VXSay(@"8 sin Boolean"); return NO; }
     int t = 1;
-    void *bTrue = p_box(boolCls, &t);
+    void *bTrue = boolCls ? p_box(boolCls, &t) : NULL;
 
     void *args[4] = { NULL, NULL, stream, bTrue };
     void *exc = NULL;
     p_inv(m, NULL, args, &exc);
-    if (exc) { VXSay(@"9 excepcion .NET"); return NO; }
+    if (exc) { VXSay([NSString stringWithFormat:@"9 %@", VXExcMsg(exc)]); return NO; }
 
     VXSay(@"parche cargado");
     return YES;
@@ -338,7 +358,7 @@ static void VXResetGuest(void) {
             NSString *full = [doc stringByAppendingPathComponent:nm];
             if ([fm fileExistsAtPath:full]) { [fm removeItemAtPath:full error:nil]; n++; }
         }
-        VXSay([NSString stringWithFormat:@"reset: %d borrados", n]);
+        VXSay([NSString stringWithFormat:@"reset: %d", n]);
     });
 }
 
@@ -533,9 +553,15 @@ static void VXInit(void) {
 
 @implementation VXWindow
 - (BOOL)pointInside:(CGPoint)p withEvent:(UIEvent *)e {
-    for (UIView *v in self.subviews)
-        for (UIView *s in v.subviews)
-            if (!s.hidden && CGRectContainsPoint(s.frame, p)) return YES;
+    for (UIView *v in self.subviews) {
+        for (UIView *panel in v.subviews) {
+            for (UIView *s in panel.subviews) {
+                if (s.hidden) continue;
+                CGRect r = [s convertRect:s.bounds toView:self];
+                if (CGRectContainsPoint(r, p)) return YES;
+            }
+        }
+    }
     return NO;
 }
 @end
