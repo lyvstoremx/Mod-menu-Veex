@@ -115,17 +115,18 @@ jobs:
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 
-      - name: Ver formatos
+      - name: Ver parche
         if: always()
         working-directory: ref
         shell: powershell
         run: |
-          foreach ($f in @('dist\Assembly-CSharp-patch-neutral.bytes','dist\Assembly-CSharp-patch.bytes')) {
-            if (Test-Path $f) {
-              $b = [System.IO.File]::ReadAllBytes($f)
-              $h = ($b[0..7] | ForEach-Object { $_.ToString('X2') }) -join ''
-              Write-Host "$f -> $($b.Length) bytes, header $h"
-            }
+          Get-ChildItem dist -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "dist: $($_.Name) $($_.Length)" }
+          Get-ChildItem generated -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "gen: $($_.Name) $($_.Length)" }
+          Get-ChildItem generated -Filter *.json -ErrorAction SilentlyContinue | ForEach-Object {
+            $raw = Get-Content $_.FullName -Raw
+            $n = ([regex]::Matches($raw, 'ProjectEspPatch')).Count
+            Write-Host "$($_.Name) menciones ProjectEspPatch: $n"
+            try { $o = $raw | ConvertFrom-Json; Write-Host ("claves: " + (($o.PSObject.Properties.Name) -join ',')) } catch { Write-Host "json no parseable" }
           }
 
       - name: Subir
