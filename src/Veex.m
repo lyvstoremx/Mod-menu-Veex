@@ -191,8 +191,13 @@ static UILabel  *g_diag;
 static NSMutableString *g_log;
 static int       g_armed;
 
+@class VeexPanel;
+
 @interface VXWindow : UIWindow
 @end
+
+static UIWindow *g_game;
+static VeexPanel *g_panel;
 
 @interface VeexPanel : UIView {
 @public
@@ -208,6 +213,7 @@ static int       g_armed;
 }
 - (void)abrir;
 - (void)cerrar;
+- (BOOL)sobre:(CGPoint)p;
 @end
 
 static void VXSay(NSString *s) {
@@ -328,26 +334,22 @@ static void VXResetGuest(void) {
         NSFileManager *fm = [NSFileManager defaultManager];
         NSArray *raices = @[
             [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject],
-            [NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES) firstObject],
-            NSTemporaryDirectory()
+            [NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES) firstObject]
         ];
         NSArray *claves = @[@"guest", @"account", @"session", @"login", @"uuid", @"device", @"garena", @"com.dts"];
         int n = 0;
         for (NSString *r in raices) {
             if (!r) continue;
-            NSArray *hijos = [fm contentsOfDirectoryAtPath:r error:nil];
-            for (NSString *h in hijos) {
+            for (NSString *h in [fm contentsOfDirectoryAtPath:r error:nil]) {
                 NSString *low = h.lowercaseString;
                 BOOL pega = NO;
                 for (NSString *k in claves) if ([low containsString:k]) { pega = YES; break; }
-                if (!pega) continue;
-                if ([low hasSuffix:@".bytes"]) continue;
-                NSString *full = [r stringByAppendingPathComponent:h];
-                if ([fm removeItemAtPath:full error:nil]) n++;
+                if (!pega || [low hasSuffix:@".bytes"]) continue;
+                if ([fm removeItemAtPath:[r stringByAppendingPathComponent:h] error:nil]) n++;
             }
         }
-        NSString *pref = [NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES) firstObject];
-        pref = [pref stringByAppendingPathComponent:@"Preferences/com.dts.freefireth.plist"];
+        NSString *pref = [[NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES) firstObject]
+                          stringByAppendingPathComponent:@"Preferences/com.dts.freefireth.plist"];
         if ([fm fileExistsAtPath:pref] && [fm removeItemAtPath:pref error:nil]) n++;
         VXSay([NSString stringWithFormat:@"reset: %d | cierra el juego", n]);
     });
@@ -479,6 +481,11 @@ static void VXResetGuest(void) {
 
 - (void)reset { VXResetGuest(); }
 
+- (BOOL)sobre:(CGPoint)p {
+    if (_open) return CGRectContainsPoint(_box.frame, p);
+    return CGRectContainsPoint(_bubble.frame, p);
+}
+
 - (void)abrir {
     _open = YES;
     CGFloat w = MIN(250, self.bounds.size.width - 24);
@@ -520,19 +527,19 @@ static void VXResetGuest(void) {
 #pragma mark - instalar
 
 static void VXInstall(void) {
+    g_game = UIApplication.sharedApplication.keyWindow;
     CGRect b = UIScreen.mainScreen.bounds;
     g_win = [[VXWindow alloc] initWithFrame:b];
-    g_win.windowLevel = UIWindowLevelNormal + 1;
+    g_win.windowLevel = UIWindowLevelAlert + 5;
     g_win.backgroundColor = UIColor.clearColor;
     g_win.hidden = NO;
 
     UIViewController *vc = [[UIViewController alloc] init];
     vc.view.backgroundColor = UIColor.clearColor;
-    vc.view.userInteractionEnabled = YES;
     g_win.rootViewController = vc;
 
-    VeexPanel *panel = [[VeexPanel alloc] initWithFrame:b];
-    [vc.view addSubview:panel];
+    g_panel = [[VeexPanel alloc] initWithFrame:b];
+    [vc.view addSubview:g_panel];
 }
 
 __attribute__((constructor))
@@ -545,16 +552,17 @@ static void VXInit(void) {
 }
 
 @implementation VXWindow
-- (BOOL)pointInside:(CGPoint)p withEvent:(UIEvent *)e {
-    for (UIView *v in self.subviews) {
-        for (UIView *panel in v.subviews) {
-            for (UIView *s in panel.subviews) {
-                if (s.hidden) continue;
-                CGRect r = [s convertRect:s.bounds toView:self];
-                if (CGRectContainsPoint(r, p)) return YES;
-            }
+- (BOOL)pointInside:(CGPoint)p withEvent:(UIEvent *)e { return YES; }
+
+- (void)sendEvent:(UIEvent *)event {
+    if (event.type == UIEventTypeTouches && g_panel && g_game && g_game != self) {
+        BOOL mio = NO;
+        for (UITouch *t in [event allTouches]) {
+            CGPoint p = [t locationInView:g_panel];
+            if ([g_panel sobre:p]) { mio = YES; break; }
         }
+        if (!mio) { [g_game sendEvent:event]; return; }
     }
-    return NO;
+    [super sendEvent:event];
 }
 @end
