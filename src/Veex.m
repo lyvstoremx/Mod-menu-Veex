@@ -15,9 +15,14 @@
 #pragma mark - il2cpp
 
 typedef void    *(*fn_domain_get)(void);
+typedef void    *(*fn_thread_attach)(void *);
 typedef void   **(*fn_domain_get_assemblies)(void *, size_t *);
 typedef void    *(*fn_assembly_get_image)(void *);
 typedef const char *(*fn_image_get_name)(void *);
+typedef size_t   (*fn_image_class_count)(void *);
+typedef void    *(*fn_image_get_class)(void *, size_t);
+typedef const char *(*fn_class_get_name)(void *);
+typedef const char *(*fn_class_get_namespace)(void *);
 typedef void    *(*fn_class_from_name)(void *, const char *, const char *);
 typedef void    *(*fn_class_get_methods)(void *, void **);
 typedef void    *(*fn_method_get_name)(void *);
@@ -30,9 +35,14 @@ typedef void    *(*fn_string_new)(const char *);
 typedef void    *(*fn_value_box)(void *, void *);
 
 static fn_domain_get                 p_dom;
+static fn_thread_attach              p_attach;
 static fn_domain_get_assemblies      p_asms;
 static fn_assembly_get_image         p_img;
 static fn_image_get_name             p_iname;
+static fn_image_class_count          p_icount;
+static fn_image_get_class            p_iget;
+static fn_class_get_name             p_cname;
+static fn_class_get_namespace        p_cns;
 static fn_class_from_name            p_cfn;
 static fn_class_get_methods          p_cmeth;
 static fn_method_get_name            p_mname;
@@ -53,9 +63,14 @@ static int VXBind(void) {
     if (!h) h = RTLD_DEFAULT;
 
     p_dom    = (fn_domain_get)dlsym(h, "il2cpp_domain_get");
+    p_attach = (fn_thread_attach)dlsym(h, "il2cpp_thread_attach");
     p_asms   = (fn_domain_get_assemblies)dlsym(h, "il2cpp_domain_get_assemblies");
     p_img    = (fn_assembly_get_image)dlsym(h, "il2cpp_assembly_get_image");
     p_iname  = (fn_image_get_name)dlsym(h, "il2cpp_image_get_name");
+    p_icount = (fn_image_class_count)dlsym(h, "il2cpp_image_get_class_count");
+    p_iget   = (fn_image_get_class)dlsym(h, "il2cpp_image_get_class");
+    p_cname  = (fn_class_get_name)dlsym(h, "il2cpp_class_get_name");
+    p_cns    = (fn_class_get_namespace)dlsym(h, "il2cpp_class_get_namespace");
     p_cfn    = (fn_class_from_name)dlsym(h, "il2cpp_class_from_name");
     p_cmeth  = (fn_class_get_methods)dlsym(h, "il2cpp_class_get_methods");
     p_mname  = (fn_method_get_name)dlsym(h, "il2cpp_method_get_name");
@@ -67,9 +82,9 @@ static int VXBind(void) {
     p_snew   = (fn_string_new)dlsym(h, "il2cpp_string_new");
     p_box    = (fn_value_box)dlsym(h, "il2cpp_value_box");
 
-    if (!p_dom || !p_asms || !p_img || !p_iname || !p_cfn || !p_cmeth ||
-        !p_mname || !p_mpc || !p_mparam || !p_tname || !p_inv ||
-        !p_onew || !p_snew || !p_box) return 0;
+    if (!p_dom || !p_asms || !p_img || !p_iname || !p_icount || !p_iget ||
+        !p_cname || !p_cns || !p_cfn || !p_cmeth || !p_mname || !p_mpc ||
+        !p_mparam || !p_tname || !p_inv || !p_onew || !p_snew || !p_box) return 0;
     return 1;
 }
 
@@ -93,6 +108,29 @@ static void *VXClass(const char *img, const char *ns, const char *name) {
     return p_cfn(im, ns, name);
 }
 
+static void *VXFindPatchClass(int *total) {
+    *total = 0;
+    if (!p_dom) return NULL;
+    size_t n = 0;
+    void **list = p_asms(p_dom(), &n);
+    if (!list) return NULL;
+    *total = (int)n;
+    for (size_t i = 0; i < n; i++) {
+        void *im = p_img(list[i]);
+        if (!im) continue;
+        size_t cn = p_icount(im);
+        for (size_t j = 0; j < cn; j++) {
+            void *c = p_iget(im, j);
+            if (!c) continue;
+            const char *nm = p_cname(c);
+            if (!nm || strcmp(nm, "PatchManager") != 0) continue;
+            const char *ns = p_cns(c);
+            if (ns && strcmp(ns, "IFix.Core") == 0) return c;
+        }
+    }
+    return NULL;
+}
+
 static void *VXMethod(void *cls, const char *name, int argc) {
     if (!cls) return NULL;
     void *it = NULL;
@@ -111,7 +149,6 @@ static void *VXMethod(void *cls, const char *name, int argc) {
 
 static UIWindow *g_win;
 static UILabel  *g_diag;
-static UILabel  *g_title;
 static int       g_armed;
 
 @interface VXWindow : UIWindow
@@ -135,7 +172,7 @@ static int       g_armed;
 
 static void VXSay(NSString *s) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (g_diag) { g_diag.text = s; [g_diag sizeToFit]; }
+        if (g_diag) { g_diag.text = s; }
     });
 }
 
@@ -200,8 +237,8 @@ static void *VXNewStream(NSString *path, int *step) {
     void *sPath = p_snew([path UTF8String]);
     if (!sPath) { *step = 5; return NULL; }
 
-    int mode = 3;   // FileMode.Open
-    int acc  = 1;   // FileAccess.Read
+    int mode = 3;
+    int acc  = 1;
     void *bMode = p_box(intCls, &mode);
     void *bAcc  = p_box(intCls, &acc);
     if (!bMode || !bAcc) { *step = 6; return NULL; }
@@ -215,12 +252,24 @@ static void *VXNewStream(NSString *path, int *step) {
 
 static BOOL VXCargar(void) {
     if (!VXBind()) { VXSay(@"1 sin il2cpp"); return NO; }
+    void *dom = p_dom();
+    if (dom && p_attach) p_attach(dom);
 
-    void *cls = VXClass("Assembly-CSharp", "IFix.Core", "PatchManager");
-    if (!cls) { VXSay(@"2 sin PatchManager"); return NO; }
+    void *cls = NULL;
+    int total = 0;
+    for (int i = 0; i < 15; i++) {
+        cls = VXFindPatchClass(&total);
+        if (cls) break;
+        VXSay([NSString stringWithFormat:@"2 sin PatchManager | ens %d | %d/15", total, i + 1]);
+        [NSThread sleepForTimeInterval:1.0];
+    }
+    if (!cls) { VXSay([NSString stringWithFormat:@"2 nunca aparecio | ens %d", total]); return NO; }
 
     void *m = VXMethod(cls, "OptimizeLoad", 4);
-    if (!m) { VXSay(@"3 sin OptimizeLoad"); return NO; }
+    if (!m) m = VXMethod(cls, "Load", 2);
+    if (!m) m = VXMethod(cls, "Load", 1);
+    if (!m) { VXSay(@"3 sin metodo de carga"); return NO; }
+    VXSay(@"3 metodo ok");
 
     NSString *p = VXFindPatch();
     if (!p) {
@@ -250,10 +299,7 @@ static BOOL VXCargar(void) {
     void *args[4] = { NULL, NULL, stream, bTrue };
     void *exc = NULL;
     p_inv(m, NULL, args, &exc);
-    if (exc) {
-        VXSay(@"9 excepcion .NET");
-        return NO;
-    }
+    if (exc) { VXSay(@"9 excepcion .NET"); return NO; }
 
     VXSay(@"parche cargado");
     return YES;
@@ -262,7 +308,7 @@ static BOOL VXCargar(void) {
 static void VXArmPatch(void) {
     if (g_armed) return;
     g_armed = 1;
-    dispatch_async(dispatch_get_main_queue(), ^{ VXCargar(); });
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{ VXCargar(); });
 }
 
 static void VXResetGuest(void) {
@@ -306,7 +352,7 @@ static void VXResetGuest(void) {
     [_bubble addSubview:v];
 
     _box = [[UIView alloc] initWithFrame:CGRectMake(_bx, _by, 250, 0)];
-    _box.backgroundColor = [UIColor colorWithWhite:0 alpha:0.88];
+    _box.backgroundColor = [UIColor colorWithWhite:0 alpha:0.9];
     _box.layer.cornerRadius = 14;
     _box.layer.borderWidth = 1;
     _box.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.18].CGColor;
@@ -314,11 +360,11 @@ static void VXResetGuest(void) {
     _box.hidden = YES;
     [self addSubview:_box];
 
-    g_title = [[UILabel alloc] initWithFrame:CGRectMake(14, 10, 190, 20)];
-    g_title.text = @"Veex";
-    g_title.font = [UIFont boldSystemFontOfSize:16];
-    g_title.textColor = UIColor.whiteColor;
-    [_box addSubview:g_title];
+    UILabel *tt = [[UILabel alloc] initWithFrame:CGRectMake(14, 10, 190, 20)];
+    tt.text = @"Veex";
+    tt.font = [UIFont boldSystemFontOfSize:16];
+    tt.textColor = UIColor.whiteColor;
+    [_box addSubview:tt];
 
     UILabel *by = [[UILabel alloc] initWithFrame:CGRectMake(14, 28, 190, 12)];
     by.text = @"BY LEVI";
@@ -334,16 +380,9 @@ static void VXResetGuest(void) {
     [_x addTarget:self action:@selector(cerrar) forControlEvents:UIControlEventTouchUpInside];
     [_box addSubview:_x];
 
-    g_diag = [[UILabel alloc] initWithFrame:CGRectMake(14, 42, 222, 14)];
-    g_diag.font = [UIFont systemFontOfSize:9];
-    g_diag.textColor = UIColor.yellowColor;
-    g_diag.numberOfLines = 0;
-    g_diag.text = @"";
-    [_box addSubview:g_diag];
-
     NSArray *names = @[@"AIM", @"ESP", @"FOV"];
     for (int i = 0; i < 3; i++) {
-        CGFloat y = 62 + i * 26;
+        CGFloat y = 46 + i * 26;
         UILabel *l = [[UILabel alloc] initWithFrame:CGRectMake(14, y, 170, 18)];
         l.text = names[i];
         l.font = [UIFont boldSystemFontOfSize:12];
@@ -356,23 +395,30 @@ static void VXResetGuest(void) {
         _sw[i] = s;
     }
 
-    _fovVal = [[UILabel alloc] initWithFrame:CGRectMake(14, 140, 220, 14)];
+    _fovVal = [[UILabel alloc] initWithFrame:CGRectMake(14, 126, 220, 14)];
     _fovVal.text = @"FOV 140";
     _fovVal.font = [UIFont systemFontOfSize:11];
     _fovVal.textColor = UIColor.lightGrayColor;
     [_box addSubview:_fovVal];
 
-    _fov = [[UISlider alloc] initWithFrame:CGRectMake(14, 154, 222, 30)];
+    _fov = [[UISlider alloc] initWithFrame:CGRectMake(14, 140, 222, 30)];
     _fov.minimumValue = 40;
     _fov.maximumValue = 300;
     _fov.value = 140;
     [_fov addTarget:self action:@selector(fovMueve:) forControlEvents:UIControlEventValueChanged];
     [_box addSubview:_fov];
 
-    _btr[0] = CGRectMake(14, 192, 222, 32);
-    _btr[1] = CGRectMake(14, 230, 222, 32);
+    _btr[0] = CGRectMake(14, 176, 222, 32);
+    _btr[1] = CGRectMake(14, 214, 222, 32);
     [self boton:@"CARGAR PARCHE" r:_btr[0] sel:@selector(parche)];
     [self boton:@"RESET GUEST" r:_btr[1] sel:@selector(reset)];
+
+    g_diag = [[UILabel alloc] initWithFrame:CGRectMake(14, 254, 222, 56)];
+    g_diag.font = [UIFont systemFontOfSize:9];
+    g_diag.textColor = UIColor.yellowColor;
+    g_diag.numberOfLines = 0;
+    g_diag.text = @"";
+    [_box addSubview:g_diag];
 
     UITapGestureRecognizer *t = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(tap:)];
     [self addGestureRecognizer:t];
@@ -399,7 +445,7 @@ static void VXResetGuest(void) {
 
 - (void)parche {
     VXSay(@"cargando...");
-    dispatch_async(dispatch_get_main_queue(), ^{ VXCargar(); });
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{ VXCargar(); });
 }
 
 - (void)reset { VXResetGuest(); }
@@ -407,7 +453,7 @@ static void VXResetGuest(void) {
 - (void)abrir {
     _open = YES;
     CGFloat w = MIN(250, self.bounds.size.width - 24);
-    _box.frame = CGRectMake(_bx, _by, w, 272);
+    _box.frame = CGRectMake(_bx, _by, w, 320);
     _box.hidden = NO;
     _bubble.hidden = YES;
 }
@@ -457,8 +503,6 @@ static void VXInstall(void) {
 
     VeexPanel *panel = [[VeexPanel alloc] initWithFrame:b];
     [vc.view addSubview:panel];
-
-    VXSay(@"listo");
 }
 
 __attribute__((constructor))
@@ -467,9 +511,7 @@ static void VXInit(void) {
     return;
 #endif
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(14 * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(), ^{
-        VXInstall();
-    });
+                   dispatch_get_main_queue(), ^{ VXInstall(); });
 }
 
 @implementation VXWindow
