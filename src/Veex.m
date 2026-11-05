@@ -83,7 +83,7 @@ static int VXBind(void) {
     p_asms   = (fn_domain_get_assemblies)VXS(h, "il2cpp_domain_get_assemblies");
     p_img    = (fn_assembly_get_image)VXS(h, "il2cpp_assembly_get_image");
     p_iname  = (fn_image_get_name)VXS(h, "il2cpp_image_get_name");
-    p_icount = (fn_image_class_count)VXS(h, "il2cpp_image_get_class_count");
+    p_icount = (fn_image_class_count)VXS(h, "il2cpp_image_class_count");
     p_iget   = (fn_image_get_class)VXS(h, "il2cpp_image_get_class");
     p_cname  = (fn_class_get_name)VXS(h, "il2cpp_class_get_name");
     p_cns    = (fn_class_get_namespace)VXS(h, "il2cpp_class_get_namespace");
@@ -315,17 +315,15 @@ static BOOL VXCargar(void) {
     if (!m) m = VXMethod(cls, "Load", 1);
     if (!m) { VXSay(@"3 sin metodo"); return NO; }
 
-    NSString *doc = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
-    NSString *p1 = [doc stringByAppendingPathComponent:@"vx_nuestro.bytes"];
-    NSString *p2 = [doc stringByAppendingPathComponent:@"vx_neutral.bytes"];
+    NSString *bp = [[NSBundle mainBundle] resourcePath];
+    NSString *p1 = [bp stringByAppendingPathComponent:@"Assembly-CSharp-patch.bytes"];
+    NSString *p2 = [bp stringByAppendingPathComponent:@"neutral.bytes"];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    VXSay([NSString stringWithFormat:@"4 local %d %d",
+           [fm fileExistsAtPath:p1] ? 1 : 0, [fm fileExistsAtPath:p2] ? 1 : 0]);
 
-    VXSay(@"4 bajando...");
-    BOOL ok1 = VXBajarUrl(@(VX_PATCH_URL), p1);
-    BOOL ok2 = VXBajarUrl(@(VX_NEUTRAL_URL), p2);
-    VXSay([NSString stringWithFormat:@"4 nuestro %d neutral %d", ok1, ok2]);
-
-    if (ok1 && VXProbar(m, p1, @"nuestro")) return YES;
-    if (ok2 && VXProbar(m, p2, @"neutral")) return YES;
+    if (VXProbar(m, p1, @"nuestro")) return YES;
+    if (VXProbar(m, p2, @"neutral")) return YES;
     return NO;
 }
 
