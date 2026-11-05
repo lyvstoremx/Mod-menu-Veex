@@ -37,6 +37,7 @@ typedef void    *(*fn_string_new)(const char *);
 typedef uint16_t *(*fn_string_chars)(void *);
 typedef void    *(*fn_value_box)(void *, void *);
 typedef void    *(*fn_array_new)(void *, size_t);
+typedef uint32_t (*fn_array_length)(void *);
 
 static fn_domain_get                 p_dom;
 static fn_thread_attach              p_attach;
@@ -61,6 +62,7 @@ static fn_string_new                 p_snew;
 static fn_string_chars               p_schars;
 static fn_value_box                  p_box;
 static fn_array_new                  p_anew;
+static fn_array_length               p_alen;
 
 static int VXBind(void) {
     if (p_inv) return 1;
@@ -93,6 +95,7 @@ static int VXBind(void) {
     p_schars = (fn_string_chars)dlsym(h, "il2cpp_string_chars");
     p_box    = (fn_value_box)dlsym(h, "il2cpp_value_box");
     p_anew   = (fn_array_new)dlsym(h, "il2cpp_array_new");
+    p_alen   = (fn_array_length)dlsym(h, "il2cpp_array_length");
 
     if (!p_dom || !p_asms || !p_img || !p_iname || !p_icount || !p_iget ||
         !p_cname || !p_cns || !p_cfn || !p_cmeth || !p_mname || !p_mpc ||
@@ -247,37 +250,22 @@ static BOOL VXBajar(NSString *dst) {
     return [out writeToFile:dst atomically:YES];
 }
 
-static void *VXNewFile(NSString *path, NSString **why) {
+static void *VXStream(NSString *path, NSString **why) {
     *why = nil;
-    void *fsCls   = VXClass("mscorlib", "System.IO", "FileStream");
-    void *modeCls = VXClass("mscorlib", "System.IO", "FileMode");
-    if (!fsCls)   { *why = @"sin FileStream"; return NULL; }
-    if (!modeCls) { *why = @"sin FileMode"; return NULL; }
-
-    void *obj = p_onew(fsCls);
-    if (!obj) { *why = @"sin objeto"; return NULL; }
-
-    void *ctor = VXMethod(fsCls, ".ctor", 2);
-    if (!ctor) { *why = @"sin ctor2"; return NULL; }
-
-    int mode = 3;
-    void *args[2] = { p_snew([path UTF8String]), p_box(modeCls, &mode) };
-    void *exc = NULL;
-    p_inv(ctor, obj, args, &exc);
-    if (exc) { *why = VXExcMsg(exc); return NULL; }
-    return obj;
-}
-
-static void *VXNewMem(NSData *d, NSString **why) {
-    *why = nil;
+    void *fileCls = VXClass("mscorlib", "System.IO", "File");
     void *msCls   = VXClass("mscorlib", "System.IO", "MemoryStream");
-    void *byteCls = VXClass("mscorlib", "System", "Byte");
+    if (!fileCls) { *why = @"sin File"; return NULL; }
     if (!msCls)   { *why = @"sin MemoryStream"; return NULL; }
-    if (!byteCls) { *why = @"sin Byte"; return NULL; }
 
-    void *arr = p_anew(byteCls, (size_t)d.length);
-    if (!arr) { *why = @"sin arreglo"; return NULL; }
-    memcpy((char *)arr + 0x20, d.bytes, d.length);
+    void *rab = VXMethod(fileCls, "ReadAllBytes", 1);
+    if (!rab) { *why = @"sin ReadAllBytes"; return NULL; }
+
+    void *exc = NULL;
+    void *a1[1] = { p_snew([path UTF8String]) };
+    void *arr = p_inv(rab, NULL, a1, &exc);
+    if (exc) { *why = VXExcMsg(exc); return NULL; }
+    if (!arr) { *why = @"sin bytes"; return NULL; }
+    if (p_alen) *why = [NSString stringWithFormat:@"%u bytes", p_alen(arr)];
 
     void *obj = p_onew(msCls);
     if (!obj) { *why = @"sin objeto"; return NULL; }
@@ -285,9 +273,9 @@ static void *VXNewMem(NSData *d, NSString **why) {
     void *ctor = VXMethod(msCls, ".ctor", 1);
     if (!ctor) { *why = @"sin ctor"; return NULL; }
 
-    void *exc = NULL;
-    void *args[1] = { arr };
-    p_inv(ctor, obj, args, &exc);
+    void *a2[1] = { arr };
+    exc = NULL;
+    p_inv(ctor, obj, a2, &exc);
     if (exc) { *why = VXExcMsg(exc); return NULL; }
     return obj;
 }
@@ -324,31 +312,27 @@ static BOOL VXCargar(void) {
     NSData *d = [NSData dataWithContentsOfFile:p];
     if (!d || d.length < 1024) { VXSay(@"5 archivo vacio"); return NO; }
     const unsigned char *raw = d.bytes;
-    VXSay([NSString stringWithFormat:@"5 %lu KB %02X%02X%02X%02X%02X%02X%02X%02X",
-           (unsigned long)(d.length / 1024),
-           raw[0], raw[1], raw[2], raw[3], raw[4], raw[5], raw[6], raw[7]]);
-    VXSay([NSString stringWithFormat:@"5 ruta %@", p]);
+    VXSay([NSString stringWithFormat:@"5 %lu KB %02X%02X%02X%02X",
+           (unsigned long)(d.length / 1024), raw[0], raw[1], raw[2], raw[3]]);
 
     NSString *tmp = [doc stringByAppendingPathComponent:@"vxpatch.bytes"];
     [d writeToFile:tmp atomically:YES];
-    VXSay([NSString stringWithFormat:@"5 copia %d", [[NSFileManager defaultManager] fileExistsAtPath:tmp] ? 1 : 0]);
 
     void *boolCls = VXClass("mscorlib", "System", "Boolean");
 
-    for (int k = 0; k < 4; k++) {
+    for (int k = 0; k < 2; k++) {
         NSString *why = nil;
-        void *stream = nil;
-        if (k < 2) stream = VXNewFile(tmp, &why);
-        else       stream = VXNewMem(d, &why);
-        if (!stream) { VXSay([NSString stringWithFormat:@"6 %d: %@", k, why]); continue; }
+        void *stream = VXStream(tmp, &why);
+        if (!stream) { VXSay([NSString stringWithFormat:@"6: %@", why]); return NO; }
+        VXSay([NSString stringWithFormat:@"7 %@", why ? why : @"?"]);
 
-        int t = k % 2;
+        int t = k;
         void *b = boolCls ? p_box(boolCls, &t) : NULL;
         void *args[4] = { NULL, NULL, stream, b };
         void *exc = NULL;
         p_inv(m, NULL, args, &exc);
-        if (!exc) { VXSay([NSString stringWithFormat:@"OK con %d/%d", k, t]); VXSay(@"parche cargado"); return YES; }
-        VXSay([NSString stringWithFormat:@"9 %d/%d: %@", k, t, VXExcMsg(exc)]);
+        if (!exc) { VXSay(@"parche cargado"); return YES; }
+        VXSay([NSString stringWithFormat:@"9 b%d: %@", t, VXExcMsg(exc)]);
     }
     return NO;
 }
