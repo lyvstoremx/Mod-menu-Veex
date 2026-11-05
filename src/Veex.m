@@ -124,17 +124,17 @@ static void *VXClass(const char *img, const char *ns, const char *name) {
 }
 
 static void *VXFindPatchClass(int *total) {
-    *total = 0;
+    if (total) *total = 0;
     if (!p_dom) return NULL;
     const char *imgs[] = {"IFix.Core", "Assembly-CSharp", "mscorlib"};
     for (int i = 0; i < 3; i++) {
         void *im = VXImage(imgs[i]);
         if (!im) continue;
         void *c = p_cfn(im, "IFix.Core", "PatchManager");
-        if (c) { *total = 10 + i; return c; }
+        if (c) { if (total) *total = 10 + i; return c; }
         void *c2 = p_cfn(im, "", "PatchManager");
-        if (c2) { *total = 20 + i; return c2; }
-        *total = i + 1;
+        if (c2) { if (total) *total = 20 + i; return c2; }
+        if (total) *total = i + 1;
     }
     return NULL;
 }
@@ -519,7 +519,7 @@ static void VXInstall(void) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{
         [g_panel abrir];
-        VXCargar();
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{ VXCargar(); });
     });
 }
 
