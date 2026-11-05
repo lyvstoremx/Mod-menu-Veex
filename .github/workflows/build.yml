@@ -11,6 +11,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Dependencias
+        run: python3 -m pip install --quiet --break-system-packages requests lief
+
       - name: Base
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -59,9 +62,6 @@ jobs:
             mv work/Veex54.ipa work/base.ipa
           fi
           ls -la work/base.ipa
-
-      - name: Dependencias
-        run: python3 -m pip install --quiet --break-system-packages lief
 
       - name: Desempacar
         run: |
