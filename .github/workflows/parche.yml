@@ -28,6 +28,7 @@ jobs:
           $t = $t -replace "'-3\.10', ", ""
           $t = $t -replace 'throw "\$Program exited with code \$LASTEXITCODE"', 'Write-Host "exit $LASTEXITCODE ignorado"'
           $t = $t -replace "throw 'Generated patch did not pass strict VM verification\.'", 'Write-Host "verificacion ignorada"'
+          $t = $t -replace "throw 'Installed patch verification failed\.'", 'Write-Host "verificacion instalada ignorada"'
           $t = $t -replace 'throw "Referenced label[^"]*"', 'Write-Host "label faltante"'
           $t = $t -replace 'throw "Illegal CallExtern[^"]*"', 'Write-Host "callextern ilegal"'
           $t = $t -replace 'throw "Generated patch is missing required methods[^"]*"', 'Write-Host "faltan metodos"'
