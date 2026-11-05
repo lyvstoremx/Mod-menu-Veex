@@ -61,41 +61,47 @@ static fn_string_new                 p_snew;
 static fn_string_chars               p_schars;
 static fn_value_box                  p_box;
 
+static const char *g_miss = NULL;
+
+static void *VXS(void *h, const char *n) {
+    void *p = dlsym(h, n);
+    if (!p && !g_miss) g_miss = n;
+    return p;
+}
+
 static int VXBind(void) {
     if (p_inv) return 1;
     void *h = dlopen("/usr/lib/libil2cpp.dylib", RTLD_NOW);
     if (!h) h = dlopen("@rpath/libil2cpp.dylib", RTLD_NOW);
     if (!h) h = dlopen("@executable_path/Frameworks/libil2cpp.dylib", RTLD_NOW);
     if (!h) h = dlopen("@executable_path/Frameworks/UnityFramework.framework/UnityFramework", RTLD_NOW);
-    if (!h) h = RTLD_DEFAULT;
+    if (!h) h = dlopen(NULL, RTLD_NOW);
+    if (!h) { g_miss = "dlopen"; return 0; }
 
-    p_dom    = (fn_domain_get)dlsym(h, "il2cpp_domain_get");
-    p_attach = (fn_thread_attach)dlsym(h, "il2cpp_thread_attach");
-    p_asms   = (fn_domain_get_assemblies)dlsym(h, "il2cpp_domain_get_assemblies");
-    p_img    = (fn_assembly_get_image)dlsym(h, "il2cpp_assembly_get_image");
-    p_iname  = (fn_image_get_name)dlsym(h, "il2cpp_image_get_name");
-    p_icount = (fn_image_class_count)dlsym(h, "il2cpp_image_class_count");
-    p_iget   = (fn_image_get_class)dlsym(h, "il2cpp_image_get_class");
-    p_cname  = (fn_class_get_name)dlsym(h, "il2cpp_class_get_name");
-    p_cns    = (fn_class_get_namespace)dlsym(h, "il2cpp_class_get_namespace");
-    p_cfn    = (fn_class_from_name)dlsym(h, "il2cpp_class_from_name");
-    p_cmeth  = (fn_class_get_methods)dlsym(h, "il2cpp_class_get_methods");
-    p_cmn    = (fn_class_get_method_from_name)dlsym(h, "il2cpp_class_get_method_from_name");
-    p_mname  = (fn_method_get_name)dlsym(h, "il2cpp_method_get_name");
-    p_mpc    = (fn_method_get_param_count)dlsym(h, "il2cpp_method_get_param_count");
-    p_mparam = (fn_method_get_param)dlsym(h, "il2cpp_method_get_param");
-    p_tname  = (fn_type_get_name)dlsym(h, "il2cpp_type_get_name");
-    p_inv    = (fn_runtime_invoke)dlsym(h, "il2cpp_runtime_invoke");
-    p_onew   = (fn_object_new)dlsym(h, "il2cpp_object_new");
-    p_ogc    = (fn_object_get_class)dlsym(h, "il2cpp_object_get_class");
-    p_snew   = (fn_string_new)dlsym(h, "il2cpp_string_new");
-    p_schars = (fn_string_chars)dlsym(h, "il2cpp_string_chars");
-    p_box    = (fn_value_box)dlsym(h, "il2cpp_value_box");
+    p_dom    = (fn_domain_get)VXS(h, "il2cpp_domain_get");
+    p_attach = (fn_thread_attach)VXS(h, "il2cpp_thread_attach");
+    p_asms   = (fn_domain_get_assemblies)VXS(h, "il2cpp_domain_get_assemblies");
+    p_img    = (fn_assembly_get_image)VXS(h, "il2cpp_assembly_get_image");
+    p_iname  = (fn_image_get_name)VXS(h, "il2cpp_image_get_name");
+    p_icount = (fn_image_class_count)VXS(h, "il2cpp_image_get_class_count");
+    p_iget   = (fn_image_get_class)VXS(h, "il2cpp_image_get_class");
+    p_cname  = (fn_class_get_name)VXS(h, "il2cpp_class_get_name");
+    p_cns    = (fn_class_get_namespace)VXS(h, "il2cpp_class_get_namespace");
+    p_cfn    = (fn_class_from_name)VXS(h, "il2cpp_class_from_name");
+    p_cmeth  = (fn_class_get_methods)VXS(h, "il2cpp_class_get_methods");
+    p_cmn    = (fn_class_get_method_from_name)VXS(h, "il2cpp_class_get_method_from_name");
+    p_mname  = (fn_method_get_name)VXS(h, "il2cpp_method_get_name");
+    p_mpc    = (fn_method_get_param_count)VXS(h, "il2cpp_method_get_param_count");
+    p_mparam = (fn_method_get_param)VXS(h, "il2cpp_method_get_param");
+    p_tname  = (fn_type_get_name)VXS(h, "il2cpp_type_get_name");
+    p_inv    = (fn_runtime_invoke)VXS(h, "il2cpp_runtime_invoke");
+    p_onew   = (fn_object_new)VXS(h, "il2cpp_object_new");
+    p_ogc    = (fn_object_get_class)VXS(h, "il2cpp_object_get_class");
+    p_snew   = (fn_string_new)VXS(h, "il2cpp_string_new");
+    p_schars = (fn_string_chars)VXS(h, "il2cpp_string_chars");
+    p_box    = (fn_value_box)VXS(h, "il2cpp_value_box");
 
-    if (!p_dom || !p_asms || !p_img || !p_iname || !p_icount || !p_iget ||
-        !p_cname || !p_cns || !p_cfn || !p_cmeth || !p_mname || !p_mpc ||
-        !p_mparam || !p_tname || !p_inv || !p_onew || !p_snew || !p_box) return 0;
-    return 1;
+    return g_miss ? 0 : 1;
 }
 
 static void *VXImage(const char *needle) {
@@ -215,20 +221,6 @@ static void VXSay(NSString *s) {
 
 #pragma mark - parche
 
-static NSString *VXFindPatch(void) {
-    NSArray *dirs = @[
-        [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject],
-        [[NSBundle mainBundle] bundlePath],
-        [[NSBundle mainBundle] resourcePath]
-    ];
-    for (NSString *d in dirs) {
-        if (!d) continue;
-        NSString *p = [d stringByAppendingPathComponent:@"Assembly-CSharp-patch.bytes"];
-        if ([[NSFileManager defaultManager] fileExistsAtPath:p]) return p;
-    }
-    return nil;
-}
-
 static BOOL VXBajarUrl(NSString *url, NSString *dst) {
     NSURL *u = [NSURL URLWithString:url];
     NSMutableURLRequest *r = [NSMutableURLRequest requestWithURL:u];
@@ -298,7 +290,7 @@ static BOOL VXProbar(void *m, NSString *path, NSString *eti) {
 }
 
 static BOOL VXCargar(void) {
-    if (!VXBind()) { VXSay(@"1 sin il2cpp"); return NO; }
+    if (!VXBind()) { VXSay([NSString stringWithFormat:@"1 sin %s", g_miss ? g_miss : "?"]); return NO; }
     void *dom = p_dom();
     if (dom && p_attach) p_attach(dom);
 
@@ -334,14 +326,30 @@ static BOOL VXCargar(void) {
 static void VXResetGuest(void) {
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
         NSFileManager *fm = [NSFileManager defaultManager];
-        NSString *doc = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
-        NSArray *names = @[@"guest", @"Guest", @"garena_guest", @"login", @"session", @"uuid", @"device_id", @"prefs"];
+        NSArray *raices = @[
+            [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject],
+            [NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES) firstObject],
+            NSTemporaryDirectory()
+        ];
+        NSArray *claves = @[@"guest", @"account", @"session", @"login", @"uuid", @"device", @"garena", @"com.dts"];
         int n = 0;
-        for (NSString *nm in names) {
-            NSString *full = [doc stringByAppendingPathComponent:nm];
-            if ([fm fileExistsAtPath:full]) { [fm removeItemAtPath:full error:nil]; n++; }
+        for (NSString *r in raices) {
+            if (!r) continue;
+            NSArray *hijos = [fm contentsOfDirectoryAtPath:r error:nil];
+            for (NSString *h in hijos) {
+                NSString *low = h.lowercaseString;
+                BOOL pega = NO;
+                for (NSString *k in claves) if ([low containsString:k]) { pega = YES; break; }
+                if (!pega) continue;
+                if ([low hasSuffix:@".bytes"]) continue;
+                NSString *full = [r stringByAppendingPathComponent:h];
+                if ([fm removeItemAtPath:full error:nil]) n++;
+            }
         }
-        VXSay([NSString stringWithFormat:@"reset: %d", n]);
+        NSString *pref = [NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES) firstObject];
+        pref = [pref stringByAppendingPathComponent:@"Preferences/com.dts.freefireth.plist"];
+        if ([fm fileExistsAtPath:pref] && [fm removeItemAtPath:pref error:nil]) n++;
+        VXSay([NSString stringWithFormat:@"reset: %d | cierra el juego", n]);
     });
 }
 
@@ -542,7 +550,7 @@ static void VXInit(void) {
         for (UIView *panel in v.subviews) {
             for (UIView *s in panel.subviews) {
                 if (s.hidden) continue;
-                CGRect r = [s convertRect:s.bounds toView:panel];
+                CGRect r = [s convertRect:s.bounds toView:self];
                 if (CGRectContainsPoint(r, p)) return YES;
             }
         }
