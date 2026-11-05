@@ -74,6 +74,24 @@ jobs:
           open(p, "w", encoding="utf-8").write(src2)
           print("arreglos convertidos:", n)
 
+      - name: Volver publicos los helpers
+        working-directory: ref
+        shell: python
+        run: |
+          p = r"src\ESPLogic.template.cs"
+          s = open(p, encoding="utf-8").read()
+          pares = [
+            ("private static Texture2D GetRoundedTex()", "public static Texture2D GetRoundedTex()"),
+            ("private static void DrawModernToggle(", "public static void DrawModernToggle("),
+            ("private static void DrawModernSlider(", "public static void DrawModernSlider("),
+            ("private static void DrawText(", "public static void DrawText(")
+          ]
+          for viejo, nuevo in pares:
+              assert viejo in s, viejo
+              s = s.replace(viejo, nuevo)
+          open(p, "w", encoding="utf-8").write(s)
+          print("helpers publicos: 4")
+
       - name: Quitar lambdas
         working-directory: ref
         shell: python
@@ -83,7 +101,7 @@ jobs:
           s = open(p, encoding="utf-8").read()
 
           helper = "\n".join([
-            "        private static void DrawBoneSeg(Vector3 p1, Vector3 p2, Color c, float thick, Texture2D tex, int screenHeight)",
+            "        public static void DrawBoneSeg(Vector3 p1, Vector3 p2, Color c, float thick, Texture2D tex, int screenHeight)",
             "        {",
             "            if (p1.z > 0f && p2.z > 0f)",
             "            {",
@@ -205,13 +223,14 @@ jobs:
             "    $configWriter.Write('_roundedTex')",
             "    $configWriter.Write('UnityEngine.Texture2D')",
             "    $configWriter.Write([int]0)",
-            "    $configWriter.Write([int]1)",
-            "    $configWriter.Write('ProjectEspPatch.Logic')"
+            "    $configWriter.Write([int]2)",
+            "    $configWriter.Write('ProjectEspPatch.Logic')",
+            "    $configWriter.Write('Logic')"
           ]
 
           s = s.replace(old, "\n".join(lineas), 1)
           open(p, "w", encoding="utf-8").write(s)
-          print("config ampliado con metodos, campos y clase nueva")
+          print("config ampliado")
 
       - name: Compilar parche
         working-directory: ref
@@ -231,8 +250,8 @@ jobs:
             '    var asm = AssemblyDefinition.ReadAssembly(a[0]);',
             '    foreach (var t in asm.MainModule.Types) {',
             '      if (t.Name != "Logic") continue;',
-            '      System.Console.WriteLine("TIPO: " + t.FullName);',
-            '      foreach (var m in t.Methods) System.Console.WriteLine("  [" + m.Name + "] ret=" + m.ReturnType.FullName + " params=" + m.Parameters.Count);',
+            '      System.Console.WriteLine("TIPO: [" + t.FullName + "] ns=[" + t.Namespace + "] publico=" + t.IsPublic);',
+            '      foreach (var m in t.Methods) System.Console.WriteLine("  [" + m.Name + "] publico=" + m.IsPublic + " ret=" + m.ReturnType.FullName);',
             '    }',
             '  }',
             '}'
@@ -251,6 +270,7 @@ jobs:
           if (Test-Path $f) {
             $o = Get-Content $f -Raw | ConvertFrom-Json
             Write-Host "new_classes: $(@($o.new_classes).Count)  new_methods: $(@($o.new_methods).Count)"
+            Write-Host ("clases: " + (@($o.new_classes) -join ' | '))
             Write-Host ("externos de Logic: " + (@($o.external_methods | Where-Object { $_.declaring_type -like '*Logic*' } | ForEach-Object { $_.name }) -join ', '))
           } else { Write-Host "sin report" }
 
