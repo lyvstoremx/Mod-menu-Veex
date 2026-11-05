@@ -224,19 +224,20 @@ jobs:
         shell: powershell
         run: |
           $csc = 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe'
-          @'
-using Mono.Cecil;
-class P {
-  static void Main(string[] a) {
-    var asm = AssemblyDefinition.ReadAssembly(a[0]);
-    foreach (var t in asm.MainModule.Types) {
-      if (t.Name != "Logic") continue;
-      System.Console.WriteLine("TIPO: " + t.FullName);
-      foreach (var m in t.Methods) System.Console.WriteLine("  [" + m.Name + "] ret=" + m.ReturnType.FullName + " params=" + m.Parameters.Count);
-    }
-  }
-}
-'@ | Set-Content inspect.cs -Encoding UTF8
+          $src = @(
+            'using Mono.Cecil;',
+            'class P {',
+            '  static void Main(string[] a) {',
+            '    var asm = AssemblyDefinition.ReadAssembly(a[0]);',
+            '    foreach (var t in asm.MainModule.Types) {',
+            '      if (t.Name != "Logic") continue;',
+            '      System.Console.WriteLine("TIPO: " + t.FullName);',
+            '      foreach (var m in t.Methods) System.Console.WriteLine("  [" + m.Name + "] ret=" + m.ReturnType.FullName + " params=" + m.Parameters.Count);',
+            '    }',
+            '  }',
+            '}'
+          ) -join "`n"
+          Set-Content inspect.cs $src
           Copy-Item vendor\InjectFix\ThirdParty\Mono.Cecil.dll . -Force
           & $csc /nologo /out:inspect.exe /r:Mono.Cecil.dll inspect.cs
           if (Test-Path build\ESPLogic.dll) { .\inspect.exe build\ESPLogic.dll } else { Write-Host "no hay dll" }
