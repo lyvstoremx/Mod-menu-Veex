@@ -4,7 +4,12 @@
         run: |
           set -uo pipefail
           F="$(ls dist/*.bytes | head -1)"
-          head -c 7 "$F" | grep -q UnityFS && echo "bundle ok" || { echo "no es UnityFS: $(head -c 16 "$F" | xxd -p)"; exit 1; }
-          ls -la "$F"
+          if head -c 7 "$F" | grep -q UnityFS; then
+            echo "bundle ok"
+          else
+            echo "no es UnityFS"
+            head -c 16 "$F" | xxd -p
+            exit 1
+          fi
           gh release view base >/dev/null 2>&1 || gh release create base -t base -n base
           gh release upload base "$F" --clobber
