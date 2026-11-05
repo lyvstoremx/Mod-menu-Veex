@@ -120,13 +120,18 @@ jobs:
         working-directory: ref
         shell: powershell
         run: |
-          Get-ChildItem dist -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "dist: $($_.Name) $($_.Length)" }
-          Get-ChildItem generated -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "gen: $($_.Name) $($_.Length)" }
-          Get-ChildItem generated -Filter *.json -ErrorAction SilentlyContinue | ForEach-Object {
-            $raw = Get-Content $_.FullName -Raw
-            $n = ([regex]::Matches($raw, 'ProjectEspPatch')).Count
-            Write-Host "$($_.Name) menciones ProjectEspPatch: $n"
-            try { $o = $raw | ConvertFrom-Json; Write-Host ("claves: " + (($o.PSObject.Properties.Name) -join ',')) } catch { Write-Host "json no parseable" }
+          foreach ($f in @('dist\Assembly-CSharp-patch.report.json','dist\Assembly-CSharp-patch.verify.json')) {
+            if (-not (Test-Path $f)) { Write-Host "falta $f"; continue }
+            $raw = Get-Content $f -Raw
+            Write-Host "$f -> ProjectEspPatch: $(([regex]::Matches($raw,'ProjectEspPatch')).Count)  Logic: $(([regex]::Matches($raw,'Logic')).Count)"
+            try {
+              $o = $raw | ConvertFrom-Json
+              Write-Host ("claves: " + (($o.PSObject.Properties.Name) -join ','))
+              $o.PSObject.Properties | Where-Object { $_.Name -match 'type|new|class' } | ForEach-Object {
+                Write-Host "-- $($_.Name)"
+                Write-Host (($_.Value | ConvertTo-Json -Depth 4 -Compress))
+              }
+            } catch { Write-Host "no parseable" }
           }
 
       - name: Subir
