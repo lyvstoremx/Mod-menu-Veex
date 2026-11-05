@@ -15,11 +15,50 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
           mkdir -p work
-          gh release download base -p 'Veex54.ipa' -D work
-          mv work/Veex54.ipa work/base.ipa
-          [ "$(head -c 2 work/base.ipa)" = "PK" ] || { echo "base invalida"; exit 1; }
+          python3 - <<'PY'
+          import re, requests, sys
+          key = "od7voveps5u10c1"
+          UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15"
+          s = requests.Session()
+          s.headers.update({"User-Agent": UA, "Referer": "https://www.mediafire.com/"})
+          link = None
+          try:
+              r = s.get("https://www.mediafire.com/api/1.5/file/get_links.php",
+                        params={"quick_key": key, "link_type": "direct_download",
+                                "response_format": "json", "version": "1.5"}, timeout=40)
+              for l in r.json().get("response", {}).get("links", []):
+                  if l.get("direct_download"):
+                      link = l["direct_download"]; break
+          except Exception as e:
+              print("api:", e)
+          if not link:
+              for c in ("https://www.mediafire.com/download/%s/com.dts.freefireth_1.132.1_und3fined.ipa" % key,
+                        "https://www.mediafire.com/download_repair.php?quick_key=%s" % key,
+                        "https://www.mediafire.com/file/%s/file" % key):
+                  try:
+                      r = s.get(c, timeout=40)
+                      m = re.search(r'https?://download[0-9]*\.mediafire\.com/[^"\'\s<>\\]+', r.text.replace("\\/", "/"))
+                      if m: link = m.group(0); break
+                  except Exception as e:
+                      print(c, e)
+          if not link:
+              print("sin enlace"); sys.exit(1)
+          r = s.get(link.split("?")[0], stream=True, timeout=1800)
+          r.raise_for_status()
+          with open("work/base.ipa", "wb") as f:
+              for c in r.iter_content(1 << 16):
+                  f.write(c)
+          print("bajado")
+          PY
+          if [ ! -s work/base.ipa ] || [ "$(head -c 2 work/base.ipa)" != "PK" ]; then
+            echo "mediafire fallo, uso Veex54"
+            rm -f work/base.ipa
+            gh release download base -p 'Veex54.ipa' -D work
+            mv work/Veex54.ipa work/base.ipa
+          fi
+          ls -la work/base.ipa
 
       - name: Dependencias
         run: python3 -m pip install --quiet --break-system-packages lief
@@ -82,7 +121,6 @@ jobs:
             cp work/Assembly-CSharp-patch.bytes "$APP/"
           fi
           curl -sSL -o "$APP/neutral.bytes" "https://raw.githubusercontent.com/ttanhios1602-beep/3105-MENU/master/project-freefire_c%23/baseline/Assembly-CSharp-patch-neutral.bytes" || true
-          ls -la "$APP"/*.bytes || true
 
       - name: Firmar
         run: |
