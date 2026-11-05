@@ -61,14 +61,32 @@ jobs:
         run: |
           set -euo pipefail
           EXE="$APP/$(basename "$APP" .app)"
-          rm -f "$APP"/Frameworks/*eex*.dylib
-          python3 - "$EXE" <<'PY'
-          import lief, sys
-          exe = sys.argv[1]
-          for _ in range(8):
+          echo "--- Frameworks antes ---"
+          ls -la "$APP/Frameworks" || true
+          python3 - "$APP" "$EXE" <<'PY'
+          import lief, os, sys
+          app, exe = sys.argv[1], sys.argv[2]
+          keep = ("libil2cpp", "libmono", "libunity", "libveexcore", "unityframework",
+                  "libswift", "libiphone", "libjs", "libtbb", "libc++", "libobjc")
+          fw = os.path.join(app, "Frameworks")
+          muertos = []
+          if os.path.isdir(fw):
+              for n in sorted(os.listdir(fw)):
+                  if not n.endswith(".dylib"):
+                      continue
+                  if any(k in n.lower() for k in keep) and "veex" not in n.lower():
+                      continue
+                  try:
+                      os.remove(os.path.join(fw, n))
+                      muertos.append(n)
+                  except Exception as e:
+                      print("no borre", n, e)
+          print("dylibs fuera:", muertos)
+          for _ in range(10):
               b = lief.parse(exe)
-              hit = [l.name for l in b.libraries if "veex" in l.name.lower()]
-              print("quedan:", hit)
+              hit = [l.name for l in b.libraries
+                     if os.path.basename(l.name) in muertos or "veex" in l.name.lower()]
+              print("load commands a quitar:", hit)
               if not hit:
                   b.add_library("@executable_path/Frameworks/libveexcore.dylib")
                   b.write(exe)
@@ -83,6 +101,8 @@ jobs:
           mkdir -p "$APP/Frameworks"
           cp out/libveexcore.dylib "$APP/Frameworks/"
           chmod +x "$APP/Frameworks/libveexcore.dylib"
+          echo "--- Frameworks despues ---"
+          ls -la "$APP/Frameworks"
 
       - name: Parche
         env:
