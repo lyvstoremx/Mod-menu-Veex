@@ -307,8 +307,13 @@ jobs:
           ]
 
           s = s.replace(old, "\n".join(lineas), 1)
+
+          invocacion = "    $PatchConfig, $StagePatch, $DummyDirectory"
+          assert invocacion in s, "no se encontro la invocacion de IFix"
+          s = s.replace(invocacion, "    $PatchConfig, $StagePatch, $DummyDirectory, $Build", 1)
+
           open(p, "w", encoding="utf-8").write(s)
-          print("config ampliado")
+          print("config ampliado y ruta de busqueda agregada")
 
       - name: Compilar parche
         working-directory: ref
