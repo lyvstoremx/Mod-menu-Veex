@@ -140,7 +140,7 @@ static NSString *VXExc(void *exc) {
 
 #pragma mark - estado
 
-typedef struct { BOOL esp, aim, silent, fovAim, diag; CGFloat fov; } VXState;
+typedef struct { BOOL esp, aim, silent, fovAim; CGFloat fov; } VXState;
 static VXState g;
 static UIWindow *g_win;
 static UILabel *g_status;
@@ -249,18 +249,20 @@ static int VXPurga(void) {
     return n;
 }
 
-#pragma mark - panel
+#pragma mark - ventana
 
 @interface VXWindow : UIWindow
 @end
 @implementation VXWindow
-- (BOOL)pointInside:(CGPoint)p withEvent:(UIEvent *)e {
-    for (UIView *v in self.subviews)
-        for (UIView *s in v.subviews)
-            if (!s.hidden && CGRectContainsPoint(s.frame, p)) return YES;
-    return NO;
+- (UIView *)hitTest:(CGPoint)p withEvent:(UIEvent *)e {
+    UIView *r = [super hitTest:p withEvent:e];
+    if (r == self) return nil;
+    if (r == self.rootViewController.view) return nil;
+    return r;
 }
 @end
+
+#pragma mark - panel
 
 static UILabel *VXLabel(CGRect f, NSString *t, CGFloat size, UIColor *c) {
     UILabel *l = [[UILabel alloc] initWithFrame:f];
@@ -275,7 +277,7 @@ static UISwitch *VXSwitch(CGRect f, BOOL on, int tag, id t, SEL a) {
     UISwitch *s = [[UISwitch alloc] initWithFrame:f];
     s.on = on;
     s.tag = tag;
-    s.transform = CGAffineTransformMakeScale(0.78, 0.78);
+    s.transform = CGAffineTransformMakeScale(0.72, 0.72);
     s.onTintColor = [UIColor colorWithRed:0.15 green:0.9 blue:0.4 alpha:1];
     [s addTarget:t action:a forControlEvents:UIControlEventValueChanged];
     return s;
@@ -297,18 +299,25 @@ static UIButton *VXBtn(CGRect f, NSString *t, id target, SEL a) {
 @end
 
 @implementation VeexPanel {
+    UIButton *_bubble;
     UIView *_box;
     UIScrollView *_scroll;
     UILabel *_fovVal;
     CGFloat _fila;
 }
 
+- (BOOL)pointInside:(CGPoint)p withEvent:(UIEvent *)e {
+    if (CGRectContainsPoint(_bubble.frame, p)) return YES;
+    if (!_box.hidden && CGRectContainsPoint(_box.frame, p)) return YES;
+    return NO;
+}
+
 - (void)add:(UIView *)v { [_scroll addSubview:v]; }
 
 - (void)fila:(NSString *)titulo tag:(int)tag on:(BOOL)on {
-    [self add:VXLabel(CGRectMake(10, _fila, 200, 20), titulo, 11, UIColor.whiteColor)];
-    [self add:VXSwitch(CGRectMake(250, _fila - 4, 0, 0), on, tag, self, @selector(cambio:))];
-    _fila += 26;
+    [self add:VXLabel(CGRectMake(10, _fila, 190, 20), titulo, 11, UIColor.whiteColor)];
+    [self add:VXSwitch(CGRectMake(238, _fila - 5, 0, 0), on, tag, self, @selector(cambio:))];
+    _fila += 25;
 }
 
 - (id)initWithFrame:(CGRect)f {
@@ -316,81 +325,91 @@ static UIButton *VXBtn(CGRect f, NSString *t, id target, SEL a) {
     if (!self) return nil;
     self.backgroundColor = UIColor.clearColor;
 
-    CGFloat alto = MIN(f.size.height - 20, 300);
-    _box = [[UIView alloc] initWithFrame:CGRectMake(14, 10, 300, alto)];
+    _bubble = [UIButton buttonWithType:UIButtonTypeSystem];
+    _bubble.frame = CGRectMake(f.size.width - 62, 44, 46, 46);
+    [_bubble setTitle:@"VX" forState:UIControlStateNormal];
+    [_bubble setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+    _bubble.titleLabel.font = [UIFont fontWithName:@"Menlo-Bold" size:14] ?: [UIFont boldSystemFontOfSize:14];
+    _bubble.backgroundColor = [UIColor colorWithWhite:0.12 alpha:0.9];
+    _bubble.layer.cornerRadius = 23;
+    _bubble.layer.borderWidth = 1;
+    _bubble.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.2].CGColor;
+    [_bubble addTarget:self action:@selector(alternar) forControlEvents:UIControlEventTouchUpInside];
+    [self addSubview:_bubble];
+
+    UIPanGestureRecognizer *bp = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(moverBurbuja:)];
+    [_bubble addGestureRecognizer:bp];
+
+    CGFloat alto = MIN(f.size.height - 16, 286);
+    _box = [[UIView alloc] initWithFrame:CGRectMake(12, 8, 296, alto)];
     _box.backgroundColor = [UIColor colorWithWhite:0.05 alpha:0.97];
     _box.layer.cornerRadius = 12;
     _box.layer.borderWidth = 1;
     _box.layer.borderColor = [UIColor colorWithWhite:1 alpha:0.14].CGColor;
+    _box.hidden = YES;
     [self addSubview:_box];
 
-    UIView *cab = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 300, 56)];
-    cab.backgroundColor = UIColor.clearColor;
+    UIView *cab = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 296, 50)];
     [_box addSubview:cab];
-    [cab addSubview:VXLabel(CGRectMake(12, 6, 180, 22), @"Veex", 18, UIColor.whiteColor)];
-    [cab addSubview:VXLabel(CGRectMake(12, 26, 180, 12), @"BY LEVI", 9,
-                            [UIColor colorWithWhite:1 alpha:0.45])];
-    [cab addSubview:VXLabel(CGRectMake(12, 39, 200, 12), @"t.me/levibrouh", 9,
+    [cab addSubview:VXLabel(CGRectMake(12, 4, 170, 22), @"Veex", 17, UIColor.whiteColor)];
+    [cab addSubview:VXLabel(CGRectMake(12, 24, 170, 12), @"BY LEVI", 9, [UIColor colorWithWhite:1 alpha:0.45])];
+    [cab addSubview:VXLabel(CGRectMake(12, 36, 190, 12), @"t.me/levibrouh", 9,
                             [UIColor colorWithRed:0.15 green:0.9 blue:0.4 alpha:1])];
-    [cab addSubview:VXBtn(CGRectMake(258, 8, 34, 34), @"X", self, @selector(cerrar))];
+    [cab addSubview:VXBtn(CGRectMake(254, 8, 32, 32), @"X", self, @selector(alternar))];
 
     UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(arrastrar:)];
     pan.cancelsTouchesInView = NO;
     [cab addGestureRecognizer:pan];
 
-    CGFloat altoScroll = alto - 56 - 44;
-    _scroll = [[UIScrollView alloc] initWithFrame:CGRectMake(0, 56, 300, altoScroll)];
-    _scroll.contentSize = CGSizeMake(300, 400);
+    CGFloat altoScroll = alto - 50 - 40;
+    _scroll = [[UIScrollView alloc] initWithFrame:CGRectMake(0, 50, 296, altoScroll)];
+    _scroll.contentSize = CGSizeMake(296, 380);
     _scroll.showsVerticalScrollIndicator = NO;
-    _scroll.alwaysBounceVertical = YES;
     [_box addSubview:_scroll];
 
-    _fila = 4;
-    [self add:VXLabel(CGRectMake(10, _fila, 120, 14), @"AIM", 9,
-                      [UIColor colorWithWhite:1 alpha:0.5])];
-    _fila += 18;
+    _fila = 2;
+    [self add:VXLabel(CGRectMake(10, _fila, 120, 13), @"AIM", 9, [UIColor colorWithWhite:1 alpha:0.5])];
+    _fila += 16;
     [self fila:@"Silent aim" tag:2 on:NO];
     [self fila:@"Aim drag" tag:1 on:NO];
     [self fila:@"Circulo FOV" tag:3 on:YES];
 
-    _fovVal = VXLabel(CGRectMake(10, _fila, 70, 18), @"FOV 120", 11, UIColor.whiteColor);
+    _fovVal = VXLabel(CGRectMake(10, _fila, 66, 18), @"FOV 120", 11, UIColor.whiteColor);
     [self add:_fovVal];
-    UISlider *sl = [[UISlider alloc] initWithFrame:CGRectMake(80, _fila, 190, 22)];
+    UISlider *sl = [[UISlider alloc] initWithFrame:CGRectMake(76, _fila, 190, 22)];
     sl.minimumValue = 30; sl.maximumValue = 400; sl.value = 120;
     sl.minimumTrackTintColor = [UIColor colorWithRed:0.15 green:0.9 blue:0.4 alpha:1];
     [sl addTarget:self action:@selector(fov:) forControlEvents:UIControlEventValueChanged];
     [self add:sl];
-    _fila += 30;
+    _fila += 28;
 
-    [self add:VXLabel(CGRectMake(10, _fila, 120, 14), @"ESP", 9,
-                      [UIColor colorWithWhite:1 alpha:0.5])];
-    _fila += 18;
+    [self add:VXLabel(CGRectMake(10, _fila, 120, 13), @"ESP", 9, [UIColor colorWithWhite:1 alpha:0.5])];
+    _fila += 16;
     NSArray *nombres = @[@"ESP", @"Caja", @"Linea", @"Salud", @"Nombre", @"Distancia"];
     for (int i = 0; i < 6; i++) [self fila:nombres[i] tag:10 + i on:(i == 0)];
-    _scroll.contentSize = CGSizeMake(300, _fila + 10);
+    _scroll.contentSize = CGSizeMake(296, _fila + 8);
 
-    [_box addSubview:VXBtn(CGRectMake(10, alto - 38, 140, 30), @"CARGAR PARCHE", self, @selector(cargar))];
-    [_box addSubview:VXBtn(CGRectMake(156, alto - 38, 134, 30), @"RESET GUEST", self, @selector(reset))];
+    [_box addSubview:VXBtn(CGRectMake(10, alto - 34, 138, 28), @"CARGAR PARCHE", self, @selector(cargar))];
+    [_box addSubview:VXBtn(CGRectMake(152, alto - 34, 134, 28), @"RESET GUEST", self, @selector(reset))];
 
-    g_status = VXLabel(CGRectMake(0, 0, 0, 0), @"", 9,
-                       [UIColor colorWithRed:1 green:0.85 blue:0.3 alpha:1]);
+    g_status = VXLabel(CGRectMake(0, 0, 0, 0), @"", 9, [UIColor colorWithRed:1 green:0.85 blue:0.3 alpha:1]);
     g_status.numberOfLines = 0;
-
-    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(tap:)];
-    tap.cancelsTouchesInView = NO;
-    [cab addGestureRecognizer:tap];
     return self;
 }
 
-- (void)tap:(UITapGestureRecognizer *)t { if (t.state == UIGestureRecognizerStateEnded) _box.hidden = YES; }
+- (void)alternar { _box.hidden = !_box.hidden; }
+
+- (void)moverBurbuja:(UIPanGestureRecognizer *)p {
+    CGPoint d = [p translationInView:self];
+    _bubble.center = CGPointMake(_bubble.center.x + d.x, _bubble.center.y + d.y);
+    [p setTranslation:CGPointZero inView:self];
+}
 
 - (void)arrastrar:(UIPanGestureRecognizer *)p {
     CGPoint d = [p translationInView:self];
     _box.center = CGPointMake(_box.center.x + d.x, _box.center.y + d.y);
     [p setTranslation:CGPointZero inView:self];
 }
-
-- (void)cerrar { _box.hidden = YES; }
 
 - (void)cambio:(UISwitch *)s {
     switch (s.tag) {
