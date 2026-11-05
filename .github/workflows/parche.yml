@@ -200,6 +200,66 @@ jobs:
           ])
           s = s.replace(firma_metodo, firma_metodo + remapeo_metodo, 1)
 
+          viejo_param = "\n".join([
+            "            ParameterDefinition helperParameter = source.Operand as ParameterDefinition;",
+            "            if (helperParameter != null)",
+            "            {",
+            "                int helperIndex = helperMethod.Parameters.IndexOf(helperParameter);",
+            "                if (source.OpCode != OpCodes.Ldarg && source.OpCode != OpCodes.Ldarg_S)",
+            "                {",
+            "                    throw new InvalidOperationException(",
+            "                        \"Unsupported access to helper parameter: \" + source.OpCode);",
+            "                }",
+            "                if (helperIndex == 0)",
+            "                {",
+            "                    return Instruction.Create(OpCodes.Ldarg_0);",
+            "                }",
+            "                int targetIndex = helperIndex - 1;",
+            "                if (targetIndex < 0 || targetIndex >= targetMethod.Parameters.Count",
+            "                    || !SameType(helperParameter.ParameterType,",
+            "                        targetMethod.Parameters[targetIndex].ParameterType))",
+            "                {",
+            "                    throw new InvalidOperationException(",
+            "                        \"Helper parameter does not match target method: \"",
+            "                        + helperParameter.Name);",
+            "                }",
+            "                return Instruction.Create(source.OpCode, targetMethod.Parameters[targetIndex]);",
+            "            }"
+          ])
+          assert viejo_param in s, "no se encontro el bloque de parametros"
+
+          nuevo_param = "\n".join([
+            "            ParameterDefinition helperParameter = source.Operand as ParameterDefinition;",
+            "            if (helperParameter != null)",
+            "            {",
+            "                int helperIndex = helperMethod.Parameters.IndexOf(helperParameter);",
+            "                bool direccion = source.OpCode == OpCodes.Ldarga",
+            "                    || source.OpCode == OpCodes.Ldarga_S;",
+            "                if (source.OpCode != OpCodes.Ldarg && source.OpCode != OpCodes.Ldarg_S",
+            "                    && !direccion)",
+            "                {",
+            "                    throw new InvalidOperationException(",
+            "                        \"Unsupported access to helper parameter: \" + source.OpCode);",
+            "                }",
+            "                int targetIndex = helperMethod.HasThis ? helperIndex - 1 : helperIndex;",
+            "                if (!helperMethod.HasThis && helperIndex == 0 && !direccion)",
+            "                {",
+            "                    return Instruction.Create(OpCodes.Ldarg_0);",
+            "                }",
+            "                if (targetIndex < 0 || targetIndex >= targetMethod.Parameters.Count",
+            "                    || !SameType(helperParameter.ParameterType,",
+            "                        targetMethod.Parameters[targetIndex].ParameterType))",
+            "                {",
+            "                    throw new InvalidOperationException(",
+            "                        \"Helper parameter does not match target method: \"",
+            "                        + helperParameter.Name);",
+            "                }",
+            "                OpCode opcode = direccion ? OpCodes.Ldarga : source.OpCode;",
+            "                return Instruction.Create(opcode, targetMethod.Parameters[targetIndex]);",
+            "            }"
+          ])
+          s = s.replace(viejo_param, nuevo_param, 1)
+
           ghost = "            TypeDefinition ghostHelperType = helperAssembly.MainModule.GetType(\"ProjectEspPatch.GhostFeature\");\n"
           assert ghost in s
           s = s.replace(ghost, ghost + "            CopyType(helperType);\n            CopyType(ghostHelperType);\n", 1)
@@ -313,7 +373,7 @@ jobs:
           s = s.replace(invocacion, "    $PatchConfig, $StagePatch, $DummyDirectory, $Build", 1)
 
           open(p, "w", encoding="utf-8").write(s)
-          print("config ampliado y ruta de busqueda agregada")
+          print("config ampliado y ruta agregada")
 
       - name: Compilar parche
         working-directory: ref
