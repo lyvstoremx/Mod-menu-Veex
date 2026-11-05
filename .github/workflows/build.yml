@@ -86,9 +86,9 @@ jobs:
             cp work/Assembly-CSharp-patch.bytes "$APP/"
           fi
           git clone --depth 1 https://github.com/ttanhios1602-beep/3105-MENU.git ref 2>/dev/null || true
-          if [ -f "ref/project-freefire_c#/baseline/Assembly-CSharp-patch-neutral.bytes" ]; then
-            cp "ref/project-freefire_c#/baseline/Assembly-CSharp-patch-neutral.bytes" "$APP/neutral.bytes"
-          fi
+          N="$(find ref -name '*neutral*.bytes' 2>/dev/null | head -1)"
+          echo "neutral: $N"
+          if [ -n "$N" ]; then cp "$N" "$APP/neutral.bytes"; fi
           ls -la "$APP"/*.bytes || true
 
       - name: Firmar
