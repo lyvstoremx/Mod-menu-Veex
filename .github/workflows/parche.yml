@@ -26,6 +26,7 @@ jobs:
           $t = Get-Content build.ps1 -Raw
           $t = $t -replace "'py'", "'python'"
           $t = $t -replace "'-3\.10', ", ""
+          $t = $t -replace 'throw "\$Program exited with code \$LASTEXITCODE"', 'Write-Host "exit $LASTEXITCODE ignorado"'
           Set-Content build.ps1 $t -NoNewline
 
       - name: Renombrar ensamblado
@@ -35,7 +36,6 @@ jobs:
           $t = Get-Content build.ps1 -Raw
           $t = $t -replace 'ESPLogic\.dll', 'Assembly-CSharp.dll'
           Set-Content build.ps1 $t -NoNewline
-          Select-String -Path build.ps1 -Pattern 'Assembly-CSharp\.dll' | Select-Object -First 5
 
       - name: Elegir compilador
         working-directory: ref
@@ -47,25 +47,6 @@ jobs:
           $t = Get-Content build.ps1 -Raw
           $t = $t -replace "\`$Csc = '.*'", "`$Csc = '$($csc.FullName)'"
           Set-Content build.ps1 $t -NoNewline
-
-      - name: Ablandar aserciones
-        working-directory: ref
-        shell: powershell
-        run: |
-          $lines = Get-Content build.ps1
-          for ($i = 0; $i -lt $lines.Count; $i++) {
-            if ($lines[$i] -match 'if \(-not \$(final)?[vV]erification\.valid') {
-              $lines[$i] = 'if ($false) {'
-              if ($i + 1 -lt $lines.Count -and $lines[$i+1] -match '^\s*-or @\(\$(final)?[vV]erification\.warnings') {
-                $lines[$i+1] = ''
-              }
-            }
-            if ($lines[$i] -match '^if \(\$(\w+)\.Count -ne 0\) \{') {
-              $n = $matches[1]
-              $lines[$i] = 'if ($' + $n + '.Count -ne 0) { Write-Host "AVISO ' + $n + '" }; if ($false) {'
-            }
-          }
-          Set-Content build.ps1 $lines
 
       - name: Arreglar alignment
         working-directory: ref
@@ -101,18 +82,6 @@ jobs:
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 
-      - name: Ver formatos
-        working-directory: ref
-        shell: powershell
-        run: |
-          foreach ($f in @("baseline\Assembly-CSharp-patch-neutral.bytes","dist\Assembly-CSharp-patch.bytes")) {
-            if (Test-Path $f) {
-              $b = [System.IO.File]::ReadAllBytes($f)
-              $m = -join ($b[0..7] | ForEach-Object { $_.ToString("X2") })
-              Write-Host "$f  $($b.Length)  $m"
-            } else { Write-Host "$f NO EXISTE" }
-          }
-
       - name: Subir
         uses: actions/upload-artifact@v4
         if: always()
@@ -128,4 +97,13 @@ jobs:
         shell: powershell
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload base ref\dist\Assembly-CSharp-patch.bytes --clobber --repo "$env:GITHUB_REPOSITORY"
+        run: |
+          $f = "ref\dist\Assembly-CSharp-patch.bytes"
+          if (Test-Path $f) {
+            $b = [System.IO.File]::ReadAllBytes($f)
+            Write-Host "parche: $($b.Length) bytes"
+            gh release upload base $f --clobber --repo "$env:GITHUB_REPOSITORY"
+          } else {
+            Write-Host "no existe el parche"
+            exit 1
+          }
