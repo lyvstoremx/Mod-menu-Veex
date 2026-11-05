@@ -36,7 +36,7 @@ jobs:
             Where-Object { $_.FullName -like "*Roslyn*" } | Select-Object -First 1
           if (-not $csc) { throw "no hay Roslyn" }
           $t = Get-Content build.ps1 -Raw
-          $t = $t -replace "\$Csc = '.*'", "$Csc = '$($csc.FullName)'"
+          $t = $t -replace "\`$Csc = '.*'", "`$Csc = '$($csc.FullName)'"
           Set-Content build.ps1 $t -NoNewline
 
       - name: Ablandar aserciones
@@ -108,7 +108,4 @@ jobs:
         shell: powershell
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release create base --title base --repo "$env:GITHUB_REPOSITORY" 2>$null
-          gh release upload base ref\dist\Assembly-CSharp-patch.bytes --clobber --repo "$env:GITHUB_REPOSITORY"
-          gh release view base --repo "$env:GITHUB_REPOSITORY" es este no?
+        run: gh release upload base ref\dist\Assembly-CSharp-patch.bytes --clobber --repo "$env:GITHUB_REPOSITORY"
