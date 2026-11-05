@@ -184,6 +184,7 @@ static NSString *VXExcMsg(void *exc) {
 
 static UIWindow *g_win;
 static UILabel  *g_diag;
+static NSMutableString *g_log;
 static int       g_armed;
 
 @interface VXWindow : UIWindow
@@ -207,7 +208,10 @@ static int       g_armed;
 
 static void VXSay(NSString *s) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (g_diag) { g_diag.text = s; }
+        if (!g_diag) return;
+        if (!g_log) g_log = [NSMutableString new];
+        [g_log appendFormat:@"%@\n", s];
+        g_diag.text = g_log;
     });
 }
 
@@ -241,6 +245,27 @@ static BOOL VXBajar(NSString *dst) {
     dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(45 * NSEC_PER_SEC)));
     if (!out) return NO;
     return [out writeToFile:dst atomically:YES];
+}
+
+static void *VXNewFile(NSString *path, NSString **why) {
+    *why = nil;
+    void *fsCls   = VXClass("mscorlib", "System.IO", "FileStream");
+    void *modeCls = VXClass("mscorlib", "System.IO", "FileMode");
+    if (!fsCls)   { *why = @"sin FileStream"; return NULL; }
+    if (!modeCls) { *why = @"sin FileMode"; return NULL; }
+
+    void *obj = p_onew(fsCls);
+    if (!obj) { *why = @"sin objeto"; return NULL; }
+
+    void *ctor = VXMethod(fsCls, ".ctor", 2);
+    if (!ctor) { *why = @"sin ctor2"; return NULL; }
+
+    int mode = 3;
+    void *args[2] = { p_snew([path UTF8String]), p_box(modeCls, &mode) };
+    void *exc = NULL;
+    p_inv(ctor, obj, args, &exc);
+    if (exc) { *why = VXExcMsg(exc); return NULL; }
+    return obj;
 }
 
 static void *VXNewMem(NSData *d, NSString **why) {
@@ -287,11 +312,11 @@ static BOOL VXCargar(void) {
     if (!m) m = VXMethod(cls, "Load", 1);
     if (!m) { VXSay(@"3 sin metodo"); return NO; }
 
+    NSString *doc = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
     NSString *p = VXFindPatch();
     if (!p) {
         VXSay(@"4 bajando...");
-        NSString *dst = [[NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject]
-                         stringByAppendingPathComponent:@"Assembly-CSharp-patch.bytes"];
+        NSString *dst = [doc stringByAppendingPathComponent:@"Assembly-CSharp-patch.bytes"];
         if (!VXBajar(dst)) { VXSay(@"4 no se pudo bajar"); return NO; }
         p = dst;
     }
@@ -299,23 +324,31 @@ static BOOL VXCargar(void) {
     NSData *d = [NSData dataWithContentsOfFile:p];
     if (!d || d.length < 1024) { VXSay(@"5 archivo vacio"); return NO; }
     const unsigned char *raw = d.bytes;
-    VXSay([NSString stringWithFormat:@"5 %lu KB %02X%02X%02X%02X",
-           (unsigned long)(d.length / 1024), raw[0], raw[1], raw[2], raw[3]]);
+    VXSay([NSString stringWithFormat:@"5 %lu KB %02X%02X%02X%02X%02X%02X%02X%02X",
+           (unsigned long)(d.length / 1024),
+           raw[0], raw[1], raw[2], raw[3], raw[4], raw[5], raw[6], raw[7]]);
+    VXSay([NSString stringWithFormat:@"5 ruta %@", p]);
+
+    NSString *tmp = [doc stringByAppendingPathComponent:@"vxpatch.bytes"];
+    [d writeToFile:tmp atomically:YES];
+    VXSay([NSString stringWithFormat:@"5 copia %d", [[NSFileManager defaultManager] fileExistsAtPath:tmp] ? 1 : 0]);
 
     void *boolCls = VXClass("mscorlib", "System", "Boolean");
 
-    for (int k = 0; k < 2; k++) {
+    for (int k = 0; k < 4; k++) {
         NSString *why = nil;
-        void *stream = VXNewMem(d, &why);
-        if (!stream) { VXSay([NSString stringWithFormat:@"6 mem: %@", why]); return NO; }
+        void *stream = nil;
+        if (k < 2) stream = VXNewFile(tmp, &why);
+        else       stream = VXNewMem(d, &why);
+        if (!stream) { VXSay([NSString stringWithFormat:@"6 %d: %@", k, why]); continue; }
 
-        int t = k;
+        int t = k % 2;
         void *b = boolCls ? p_box(boolCls, &t) : NULL;
         void *args[4] = { NULL, NULL, stream, b };
         void *exc = NULL;
         p_inv(m, NULL, args, &exc);
-        if (!exc) { VXSay(@"parche cargado"); return YES; }
-        VXSay([NSString stringWithFormat:@"9 b%d: %@", t, VXExcMsg(exc)]);
+        if (!exc) { VXSay([NSString stringWithFormat:@"OK con %d/%d", k, t]); VXSay(@"parche cargado"); return YES; }
+        VXSay([NSString stringWithFormat:@"9 %d/%d: %@", k, t, VXExcMsg(exc)]);
     }
     return NO;
 }
@@ -422,8 +455,8 @@ static void VXResetGuest(void) {
     [self boton:@"CARGAR PARCHE" r:_btr[0] sel:@selector(parche)];
     [self boton:@"RESET GUEST" r:_btr[1] sel:@selector(reset)];
 
-    g_diag = [[UILabel alloc] initWithFrame:CGRectMake(14, 254, 222, 56)];
-    g_diag.font = [UIFont systemFontOfSize:9];
+    g_diag = [[UILabel alloc] initWithFrame:CGRectMake(14, 254, 222, 90)];
+    g_diag.font = [UIFont systemFontOfSize:8];
     g_diag.textColor = UIColor.yellowColor;
     g_diag.numberOfLines = 0;
     g_diag.text = @"";
@@ -453,6 +486,7 @@ static void VXResetGuest(void) {
 - (void)fovMueve:(UISlider *)s { _fovVal.text = [NSString stringWithFormat:@"FOV %d", (int)s.value]; }
 
 - (void)parche {
+    if (g_log) [g_log setString:@""];
     VXSay(@"cargando...");
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{ VXCargar(); });
 }
@@ -462,7 +496,7 @@ static void VXResetGuest(void) {
 - (void)abrir {
     _open = YES;
     CGFloat w = MIN(250, self.bounds.size.width - 24);
-    _box.frame = CGRectMake(_bx, _by, w, 320);
+    _box.frame = CGRectMake(_bx, _by, w, 356);
     _box.hidden = NO;
     _bubble.hidden = YES;
 }
