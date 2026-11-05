@@ -248,22 +248,22 @@ jobs:
             'class P {',
             '  static void Main(string[] a) {',
             '    var asm = AssemblyDefinition.ReadAssembly(a[0]);',
+            '    int n = 0;',
             '    foreach (var t in asm.MainModule.Types) {',
-            '      if (t.Name != "Logic") continue;',
-            '      foreach (var m in t.Methods) System.Console.WriteLine("FIRMA: " + m.FullName);',
+            '      n++;',
+            '      if (t.FullName.Contains("Esp") || t.FullName.Contains("Logic")) {',
+            '        System.Console.WriteLine("TIPO: [" + t.FullName + "] metodos=" + t.Methods.Count);',
+            '        foreach (var m in t.Methods) System.Console.WriteLine("   " + m.Name);',
+            '      }',
             '    }',
+            '    System.Console.WriteLine("tipos totales: " + n);',
             '  }',
             '}'
           ) -join "`n"
           Set-Content inspect.cs $src
           Copy-Item vendor\InjectFix\ThirdParty\Mono.Cecil.dll . -Force
           & $csc /nologo /out:inspect.exe /r:Mono.Cecil.dll inspect.cs
-          if (Test-Path build\ESPLogic.dll) { .\inspect.exe build\ESPLogic.dll }
-          Write-Host "--- config crudo:"
-          $b = [IO.File]::ReadAllBytes('build\patch-config.bin')
-          $sb = New-Object Text.StringBuilder
-          foreach ($x in $b) { if ($x -ge 32 -and $x -lt 127) { [void]$sb.Append([char]$x) } else { [void]$sb.Append('|') } }
-          Write-Host $sb.ToString()
+          if (Test-Path build\Assembly-CSharp-source.dll) { .\inspect.exe build\Assembly-CSharp-source.dll } else { Write-Host "no hay source" }
 
       - name: Ver parche
         if: always()
