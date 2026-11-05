@@ -126,30 +126,15 @@ static void *VXClass(const char *img, const char *ns, const char *name) {
 static void *VXFindPatchClass(int *total) {
     *total = 0;
     if (!p_dom) return NULL;
-
-    if (!p_icount || !p_iget) {
-        void *im = VXImage("Assembly-CSharp");
-        if (!im) return NULL;
-        *total = 1;
-        return p_cfn(im, "IFix.Core", "PatchManager");
-    }
-
-    size_t n = 0;
-    void **list = p_asms(p_dom(), &n);
-    if (!list) return NULL;
-    *total = (int)n;
-    for (size_t i = 0; i < n; i++) {
-        void *im = p_img(list[i]);
+    const char *imgs[] = {"Assembly-CSharp", "Assembly-CSharp-firstpass", "IFix.Core", "mscorlib"};
+    for (int i = 0; i < 4; i++) {
+        void *im = VXImage(imgs[i]);
         if (!im) continue;
-        size_t cn = p_icount(im);
-        for (size_t j = 0; j < cn; j++) {
-            void *c = p_iget(im, j);
-            if (!c) continue;
-            const char *nm = p_cname(c);
-            if (!nm || strcmp(nm, "PatchManager") != 0) continue;
-            const char *ns = p_cns(c);
-            if (ns && strcmp(ns, "IFix.Core") == 0) return c;
-        }
+        void *c = p_cfn(im, "IFix.Core", "PatchManager");
+        if (c) { *total = 10 + i; return c; }
+        void *c2 = p_cfn(im, "", "PatchManager");
+        if (c2) { *total = 20 + i; return c2; }
+        *total = i + 1;
     }
     return NULL;
 }
@@ -194,7 +179,6 @@ static NSString *VXExcMsg(void *exc) {
 #pragma mark - ui
 
 static UIWindow *g_win;
-static UILabel  *g_diag;
 static UITextView *g_log;
 static int       g_armed;
 
@@ -298,7 +282,7 @@ static BOOL VXCargar(void) {
     for (int i = 0; i < 90; i++) {
         cls = VXFindPatchClass(&total);
         if (cls) break;
-        VXSay([NSString stringWithFormat:@"2 sin PatchManager | %d/90", i + 1]);
+        VXSay([NSString stringWithFormat:@"2 sin PatchManager | %d/90 | %d", i + 1, total]);
         [NSThread sleepForTimeInterval:1.0];
     }
     if (!cls) { VXSay(@"2 nunca aparecio"); return NO; }
