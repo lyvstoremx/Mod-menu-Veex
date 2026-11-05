@@ -211,7 +211,7 @@ static void VXSay(NSString *s) {
     dispatch_async(dispatch_get_main_queue(), ^{
         if (!g_log) return;
         NSString *t = g_log.text;
-        if (t.length > 2000) t = [t substringFromIndex:t.length - 1600];
+        if (t.length > 3000) t = [t substringFromIndex:t.length - 2400];
         g_log.text = [NSString stringWithFormat:@"%@%@\n", t, s];
         NSRange r = NSMakeRange(g_log.text.length, 0);
         [g_log scrollRangeToVisible:r];
@@ -302,6 +302,49 @@ static BOOL VXCargar(void) {
     if (VXProbar(m, p1, @"nuestro")) return YES;
     if (VXProbar(m, p2, @"neutral")) return YES;
     return NO;
+}
+
+static void VXDump(void) {
+    VXSay(@"=== VOLCADO ===");
+    if (!VXBind()) VXSay([NSString stringWithFormat:@"bind fallo: %s", g_miss ? g_miss : "?"]);
+    VXSay([NSString stringWithFormat:@"sym icount=%d iget=%d", p_icount ? 1 : 0, p_iget ? 1 : 0]);
+    if (!p_dom) { VXSay(@"sin domain"); return; }
+    if (p_attach) p_attach(p_dom());
+    size_t n = 0;
+    void **l = p_asms(p_dom(), &n);
+    VXSay([NSString stringWithFormat:@"ensamblados: %zu", n]);
+    if (!l) return;
+    for (size_t i = 0; i < n && i < 40; i++) {
+        void *im = p_img(l[i]);
+        if (!im) continue;
+        const char *nm = p_iname(im);
+        VXSay([NSString stringWithFormat:@"img %zu %s", i, nm ? nm : "?"]);
+    }
+    int hits = 0;
+    for (size_t i = 0; i < n; i++) {
+        void *im = p_img(l[i]);
+        if (!im) continue;
+        void *c = p_cfn(im, "IFix.Core", "PatchManager");
+        if (!c) c = p_cfn(im, "", "PatchManager");
+        if (!c) continue;
+        hits++;
+        VXSay([NSString stringWithFormat:@"HIT img %zu", i]);
+        void *it = NULL;
+        int k = 0;
+        while (k < 10) {
+            void *m = p_cmeth(c, &it);
+            if (!m) break;
+            const char *mn = p_mname(m);
+            char *a0 = p_mpc(m) > 0 ? p_tname(p_mparam(m, 0)) : "";
+            char *a1 = p_mpc(m) > 1 ? p_tname(p_mparam(m, 1)) : "";
+            char *a2 = p_mpc(m) > 2 ? p_tname(p_mparam(m, 2)) : "";
+            char *a3 = p_mpc(m) > 3 ? p_tname(p_mparam(m, 3)) : "";
+            VXSay([NSString stringWithFormat:@"m %s(%s,%s,%s,%s)", mn ? mn : "?", a0, a1, a2, a3]);
+            k++;
+        }
+    }
+    VXSay([NSString stringWithFormat:@"clases: %d", hits]);
+    VXSay(@"=== FIN ===");
 }
 
 static void VXResetGuest(void) {
@@ -522,6 +565,9 @@ static void VXInstall(void) {
     g_panel = [[VeexPanel alloc] initWithFrame:w.bounds];
     g_panel.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [w addSubview:g_panel];
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{ VXDump(); });
 }
 
 __attribute__((constructor))
