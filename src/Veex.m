@@ -236,11 +236,21 @@ static void *VXStream(NSString *path, NSString **why) {
     if (exc) { *why = VXExcMsg(exc); return NULL; }
     if (!arr) { *why = @"sin bytes"; return NULL; }
 
+    void *ctor = NULL;
+    void *it = NULL;
+    while (1) {
+        void *m = p_cmeth(msCls, &it);
+        if (!m) break;
+        const char *nm = p_mname(m);
+        if (!nm || strcmp(nm, ".ctor") != 0) continue;
+        if (p_mpc(m) != 1) continue;
+        char *t0 = p_tname(p_mparam(m, 0));
+        if (t0 && strstr(t0, "Byte")) { ctor = m; break; }
+    }
+    if (!ctor) { *why = @"sin ctor bytes"; return NULL; }
+
     void *obj = p_onew(msCls);
     if (!obj) { *why = @"sin objeto"; return NULL; }
-
-    void *ctor = VXMethod(msCls, ".ctor", 1);
-    if (!ctor) { *why = @"sin ctor"; return NULL; }
 
     void *a2[1] = { arr };
     exc = NULL;
