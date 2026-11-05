@@ -1,134 +1,63 @@
-name: Veex
-
-on:
-  workflow_dispatch:
-    inputs:
-      base_url:
-        description: "URL directa del IPA (opcional)"
-        required: false
-        default: ""
-
-permissions:
-  contents: write
-
-jobs:
-  build:
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Base
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          mkdir -p work
-          U="${{ github.event.inputs.base_url }}"
-          if [ -n "$U" ]; then
-            curl -sSL --retry 3 -o work/base.ipa "$U"
-          else
-            gh release download base -p 'Veex54.ipa' -D work
-            mv work/Veex54.ipa work/base.ipa
-          fi
-          [ "$(head -c 2 work/base.ipa)" = "PK" ] || { echo "base invalida"; exit 1; }
-
-      - name: Dependencias
-        run: python3 -m pip install --quiet --break-system-packages lief
-
-      - name: Desempacar
-        run: |
-          set -euo pipefail
-          cd work && unzip -q base.ipa -d app
-          A="$(find app/Payload -maxdepth 1 -name '*.app' | head -1)"
-          [ -n "$A" ] || { echo "sin .app"; exit 1; }
-          echo "APP=$PWD/$A" >> $GITHUB_ENV
-
-      - name: Compilar
-        run: |
-          set -euo pipefail
-          mkdir -p out
-          xcrun -sdk iphoneos clang -arch arm64 -dynamiclib \
-            -isysroot "$(xcrun --sdk iphoneos --show-sdk-path)" \
-            -miphoneos-version-min=15.0 \
-            -framework Foundation -framework UIKit \
-            -framework QuartzCore -framework CoreGraphics \
-            -framework CoreFoundation -framework Security \
-            -install_name @executable_path/Frameworks/libveexcore.dylib \
-            -o out/libveexcore.dylib src/Veex.m
-          xcrun -sdk iphoneos strip -x out/libveexcore.dylib
-
-      - name: Inyectar
+- name: Inyectar
         run: |
           set -euo pipefail
           EXE="$APP/$(basename "$APP" .app)"
-          echo "--- Frameworks antes ---"
-          ls -la "$APP/Frameworks" || true
-          python3 - "$APP" "$EXE" <<'PY'
+          UF="$APP/Frameworks/UnityFramework.framework/UnityFramework"
+          python3 - "$APP" "$EXE" "$UF" <<'PY'
           import lief, os, sys
-          app, exe = sys.argv[1], sys.argv[2]
+          app, exe, uf = sys.argv[1], sys.argv[2], sys.argv[3]
           keep = ("libil2cpp", "libmono", "libunity", "libveexcore", "unityframework",
-                  "libswift", "libiphone", "libjs", "libtbb", "libc++", "libobjc")
+                  "libswift", "libiphone", "libjs", "libtbb", "libc++", "libobjc",
+                  "datadome", "libsystem")
           fw = os.path.join(app, "Frameworks")
-          muertos = []
-          if os.path.isdir(fw):
-              for n in sorted(os.listdir(fw)):
+          ufdir = os.path.join(fw, "UnityFramework.framework")
+
+          muertos = set()
+          for d in (fw, ufdir):
+              if not os.path.isdir(d):
+                  continue
+              for n in sorted(os.listdir(d)):
                   if not n.endswith(".dylib"):
                       continue
                   if any(k in n.lower() for k in keep) and "veex" not in n.lower():
                       continue
                   try:
-                      os.remove(os.path.join(fw, n))
-                      muertos.append(n)
+                      os.remove(os.path.join(d, n))
+                      muertos.add(n)
                   except Exception as e:
                       print("no borre", n, e)
-          print("dylibs fuera:", muertos)
-          for _ in range(10):
-              b = lief.parse(exe)
-              hit = [l.name for l in b.libraries
-                     if os.path.basename(l.name) in muertos or "veex" in l.name.lower()]
-              print("load commands a quitar:", hit)
-              if not hit:
-                  b.add_library("@executable_path/Frameworks/libveexcore.dylib")
-                  b.write(exe)
-                  print("inyectado limpio")
-                  break
-              try:
-                  b.remove_library(hit[0])
-              except Exception as e:
-                  print("no quite", hit[0], e)
-              b.write(exe)
+          print("archivos fuera:", sorted(muertos))
+
+          for binario in (exe, uf):
+              if not os.path.exists(binario):
+                  print("no existe", binario)
+                  continue
+              print("=== revisando", binario)
+              for _ in range(10):
+                  b = lief.parse(binario)
+                  print("  libs:", [l.name for l in b.libraries])
+                  hit = []
+                  for l in b.libraries:
+                      base = os.path.basename(l.name)
+                      if base in muertos or "veex" in l.name.lower():
+                          hit.append(l.name)
+                      elif base.endswith(".dylib") and not l.name.startswith("/usr/lib") \
+                           and not l.name.startswith("/System") and not any(k in base.lower() for k in keep):
+                          hit.append(l.name)
+                  print("  quitar:", hit)
+                  if not hit:
+                      if binario == exe:
+                          b.add_library("@executable_path/Frameworks/libveexcore.dylib")
+                          b.write(binario)
+                          print("  inyectado")
+                      break
+                  try:
+                      b.remove_library(hit[0])
+                  except Exception as e:
+                      print("  no quite", hit[0], e)
+                  b.write(binario)
           PY
           mkdir -p "$APP/Frameworks"
           cp out/libveexcore.dylib "$APP/Frameworks/"
           chmod +x "$APP/Frameworks/libveexcore.dylib"
-          echo "--- Frameworks despues ---"
-          ls -la "$APP/Frameworks"
-
-      - name: Parche
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -uo pipefail
-          gh release download base -p 'Assembly-CSharp-patch.bytes' -D work 2>/dev/null || true
-          if [ -f work/Assembly-CSharp-patch.bytes ]; then
-            cp work/Assembly-CSharp-patch.bytes "$APP/"
-          fi
-
-      - name: Firmar
-        run: |
-          set -euo pipefail
-          rm -rf "$APP/_CodeSignature"
-          codesign --force --sign - "$APP/Frameworks/libveexcore.dylib"
-          codesign --force --sign - "$APP"
-
-      - name: Empaquetar
-        run: |
-          set -euo pipefail
-          cd work/app && zip -qry ../../Veex.ipa Payload
-          cd ../..
-          ls -la Veex.ipa
-
-      - name: Publicar
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload base Veex.ipa --clobber
+          ls -la "$APP/Frameworks/UnityFramework.framework" | head -30
