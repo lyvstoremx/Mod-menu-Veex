@@ -70,7 +70,22 @@ static void *g_m_getTransform = NULL;
 static void *g_m_getPosition = NULL;
 static void *g_m_proj[4] = {NULL, NULL, NULL, NULL};
 static int   g_projCount = 0;
+static float g_mtx[16];
+static BOOL  g_mtxOk = NO;
 static BOOL  g_swept = NO;
+static BOOL  g_dict = NO;
+
+static void VXLoadMatrix(void){
+    g_mtxOk = NO;
+    if (!VXOk(g_cam)) return;
+    void *nat = VXAt(g_cam, 0x10);
+    if (!VXOk(nat)) return;
+    for (int i = 0; i < 16; i++) {
+        if (!VXRead((char *)nat + 0xD8 + i * 4, &g_mtx[i], 4)) return;
+    }
+    if (g_mtx[0] == 0.0f && g_mtx[5] == 0.0f) return;
+    g_mtxOk = YES;
+}
 
 static void *VXFacadeObj(void){
     void *sb = VXAt(g_facade, 0xB8);
@@ -161,7 +176,6 @@ static BOOL VXGetCamera(void){
         }
         VXLog(@"proj resueltos=%d", g_projCount);
     }
-    if (g_projCount == 0) return NO;
 
     g_cam = cam;
     VXLog(@"cam=%p proj=%d", cam, g_projCount);
@@ -220,27 +234,37 @@ static UIColor *VXC(void){
 #pragma mark - proyección
 
 static BOOL VXProj(void *cam, CGPoint world, CGSize sz, CGPoint *out){
-    if (!cam || g_projCount == 0) return NO;
+    float x = (float)world.x, y = (float)world.y, z = 0.0f;
 
-    float v[3] = { (float)world.x, (float)world.y, 0.0f };
+    if (g_mtxOk) {
+        float w = g_mtx[3] * x + g_mtx[7] * y + g_mtx[11] * z + g_mtx[15];
+        if (w < 0.5f) w = 0.5f;
+        float nx = (g_mtx[0] * x + g_mtx[4] * y + g_mtx[8] * z + g_mtx[12]) / w;
+        float ny = (g_mtx[1] * x + g_mtx[5] * y + g_mtx[9] * z + g_mtx[13]) / w;
+        out->x = (sz.width / 2.0f) + nx * (sz.width / 2.0f);
+        out->y = (sz.height / 2.0f) - ny * (sz.height / 2.0f);
+        return YES;
+    }
+
+    if (!cam || g_projCount == 0) return NO;
+    float v[3] = { x, y, z };
     for (int i = 0; i < g_projCount; i++) {
         void *args[1] = { v };
         void *exc = NULL;
         float *r = NULL;
         @try { r = (float *)p_runtime_invoke(g_m_proj[i], cam, args, &exc); } @catch (...) { r = NULL; }
         if (!r) continue;
-        float x = r[0], y = r[1], z = r[2];
-        if (x != x || y != y) continue;
-
-        BOOL norm = (fabsf(x) <= 1.5f && fabsf(y) <= 1.5f);
+        float rx = r[0], ry = r[1], rz = r[2];
+        if (rx != rx || ry != ry) continue;
+        BOOL norm = (fabsf(rx) <= 1.5f && fabsf(ry) <= 1.5f);
         if (norm) {
-            if (x < -0.05f || x > 1.05f || y < -0.05f || y > 1.05f) continue;
-            out->x = x * sz.width;
-            out->y = (1.0f - y) * sz.height;
+            if (rx < -0.05f || rx > 1.05f || ry < -0.05f || ry > 1.05f) continue;
+            out->x = rx * sz.width;
+            out->y = (1.0f - ry) * sz.height;
         } else {
-            if (z < 0.01f) continue;
-            out->x = x;
-            out->y = sz.height - y;
+            if (rz < 0.01f) continue;
+            out->x = rx;
+            out->y = sz.height - ry;
         }
         return YES;
     }
@@ -377,6 +401,8 @@ static void VXTick(void){
         }
 
         if (g_projCount == 0 || !VXOk(g_cam)) VXGetCamera();
+        VXLoadMatrix();
+        if (g_retry % 300 == 299) VXLog(@"mtx=%d proj=%d", g_mtxOk, g_projCount);
 
         if (g_step == 1) {
             void *f = VXFacadeObj();
@@ -404,18 +430,30 @@ static void VXTick(void){
         if (g_step == 3) {
             g_retry++;
             if (g_retry % 45 != 0) return;
-            void *best = NULL; size_t bestOff = 0, bestSz = 0;
+            void *best = NULL; size_t bestOff = 0, bestSz = 0; BOOL bestDict = NO;
             for (size_t off = 0x80; off <= 0x900; off += 8) {
                 void *l = VXAt(g_match, off);
                 if (!VXOk(l)) continue;
+
                 void *it = VXAt(l, 0x10);
-                if (!VXOk(it)) continue;
-                void *first = VXAt(it, 0x20);
-                if (!VXOk(first)) continue;
-                size_t s = 0;
-                VXRead((char *)l + 0x18, &s, sizeof(s));
-                if (s == 0 || s >= 300) continue;
-                if (s > bestSz) { best = l; bestOff = off; bestSz = s; }
+                if (VXOk(it)) {
+                    void *first = VXAt(it, 0x20);
+                    size_t s = 0;
+                    VXRead((char *)l + 0x18, &s, sizeof(s));
+                    if (VXOk(first) && s > 0 && s < 300 && s > bestSz) {
+                        best = l; bestOff = off; bestSz = s; bestDict = NO;
+                    }
+                }
+
+                void *ent = VXAt(l, 0x18);
+                if (VXOk(ent)) {
+                    size_t c = 0;
+                    VXRead((char *)l + 0x20, &c, sizeof(c));
+                    void *v0 = VXAt(ent, 0x30);
+                    if (VXOk(v0) && c > 0 && c < 300 && c > bestSz) {
+                        best = l; bestOff = off; bestSz = c; bestDict = YES;
+                    }
+                }
             }
             if (!best) {
                 if (g_retry % 300 == 0) VXLog(@"sin lista (%d)", g_retry);
@@ -424,8 +462,9 @@ static void VXTick(void){
             g_retry = 0;
             g_listObj = best;
             g_listOff = bestOff;
+            g_dict = bestDict;
             g_step = 4;
-            VXLog(@"paso 4 lista=%p off=0x%zx sz=%zu", best, bestOff, bestSz);
+            VXLog(@"paso 4 obj=%p off=0x%zx n=%zu dict=%d", best, bestOff, bestSz, g_dict);
         }
 
         if (!g_listObj) return;
@@ -433,16 +472,23 @@ static void VXTick(void){
         g_L = 0; g_B = 0; g_P = 0; g_D = 0; g_boxN = 0;
 
         size_t count = 0;
-        if (!VXRead((char *)g_listObj + 0x18, &count, sizeof(count))) return;
+        void *items = NULL;
+        size_t stride = 8, base = 0x20;
+        if (g_dict) {
+            if (!VXRead((char *)g_listObj + 0x20, &count, sizeof(count))) return;
+            items = VXAt(g_listObj, 0x18);
+            stride = 0x18; base = 0x30;
+        } else {
+            if (!VXRead((char *)g_listObj + 0x18, &count, sizeof(count))) return;
+            items = VXAt(g_listObj, 0x10);
+        }
         if (count == 0 || count > 200) return;
-        g_L = (int)count;
-
-        void *items = VXAt(g_listObj, 0x10);
         if (!VXOk(items)) return;
+        g_L = (int)count;
         g_B = 1;
 
         for (size_t i = 0; i < count && g_boxN < 120; i++) {
-            void *pl = VXAt(items, 0x20 + i * 8);
+            void *pl = VXAt(items, base + i * stride);
             if (!VXOk(pl)) { g_D++; continue; }
 
             void *args[1] = { NULL };
@@ -503,6 +549,7 @@ static void VXStartESP(void){
     g_retry = 0;
     g_listObj = NULL;
     g_swept = NO;
+    g_dict = NO;
     g_esp = YES;
     if (!g_target) g_target = [VXTarget new];
     if (g_link) [g_link invalidate];
@@ -622,8 +669,8 @@ static VXMenu *g_menu = nil;
 
 - (void)estadoTap {
     NSString *msg = [NSString stringWithFormat:
-        @"L %d  B %d  P %d  D %d\noff 0x%zx  proj %d\nmatch %p\ncam %p",
-        g_L, g_B, g_P, g_D, g_listOff, g_projCount, g_match, g_cam];
+        @"L %d  B %d  P %d  D %d\noff 0x%zx  proj %d  mtx %d\nmatch %p\ncam %p",
+        g_L, g_B, g_P, g_D, g_listOff, g_projCount, g_mtxOk, g_match, g_cam];
     UIAlertController *a = [UIAlertController alertControllerWithTitle:@"ESTADO" message:msg
                                                         preferredStyle:UIAlertControllerStyleAlert];
     [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
