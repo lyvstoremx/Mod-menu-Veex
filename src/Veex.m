@@ -178,6 +178,7 @@ static UILabel *g_fovLabel;
 static UIView *g_draw;
 static CADisplayLink *g_link;
 static BOOL g_diag;
+static NSString *g_dbg;
 static UIColor *g_accent;
 
 static CGFloat VXW(void) { return [UIScreen mainScreen].bounds.size.width; }
@@ -484,17 +485,18 @@ static int VXResetGuest(NSMutableString *log) {
 - (BOOL)pointInside:(CGPoint)p withEvent:(UIEvent *)e { return NO; }
 
 - (void)drawRect:(CGRect)rect {
-    if (!g.esp) return;
+    if (!g.esp) { g_dbg = @"esp off"; return; }
     void *cam = VXCamera();
-    if (!cam) return;
+    if (!cam) { g_dbg = @"sin camara"; return; }
 
     void *trg = VXTrigger();
-    if (!trg) return;
+    if (!trg) { g_dbg = @"sin trigger"; return; }
     void *dict = *(void **)((char *)trg + 0x50);
-    if (!VXPtr(dict)) return;
+    if (!VXPtr(dict)) { g_dbg = @"dict mala"; return; }
 
     char *entries = *(char **)((char *)dict + 0x18);
     int count = *(int *)((char *)dict + 0x20);
+    g_dbg = [NSString stringWithFormat:@"cnt %d", count];
     if (!VXPtr(entries) || count <= 0 || count > 512) return;
 
     CGContextRef c = UIGraphicsGetCurrentContext();
@@ -534,6 +536,7 @@ static int VXResetGuest(NSMutableString *log) {
         drawn++;
     }
     g_entities = drawn;
+    g_dbg = [NSString stringWithFormat:@"cnt %d dib %ld", count, (long)drawn];
 }
 @end
 
@@ -600,7 +603,10 @@ static void VXShowResetCard(void) {
 
 @implementation VeexPanel
 
-- (void)tick { if (g.esp && g_draw) [(VeexDraw *)g_draw setNeedsDisplay]; }
+- (void)tick {
+    if (g.esp && g_draw) [(VeexDraw *)g_draw setNeedsDisplay];
+    if (g_diag && g_status) g_status.text = g_dbg ?: @"...";
+}
 
 - (void)bubbleTapped {
     BOOL abrir = g_panel.hidden;
@@ -831,7 +837,8 @@ static void VXBuildMenu(void) {
 
     g_status = VXL(@"", 8, [UIColor colorWithWhite:1 alpha:0.7]);
     g_status.frame = CGRectMake(14, y, pw - 28, 90);
-    g_status.hidden = !g_diag;
+    g_diag = YES;
+    g_status.hidden = NO;
     [sv addSubview:g_status];
     y += 96;
 
@@ -864,18 +871,16 @@ static void VXBuildMenu(void) {
 #pragma mark - arranque
 
 __attribute__((constructor)) static void VXInit(void) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(12 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{ VXBuildMenu(); });
+
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         for (int i = 0; i < 600; i++) {
             if (VXResolve()) {
                 void *c = VXClass("", "SpawnObjectCrossHairTrigger");
-                if (c) {
-                    g_triggerCls = c;
-                    g_trOff = VXFieldOffset(c, "transform");
-                    break;
-                }
+                if (c) { g_triggerCls = c; g_trOff = VXFieldOffset(c, "transform"); return; }
             }
             usleep(200000);
         }
-        dispatch_async(dispatch_get_main_queue(), ^{ VXBuildMenu(); });
     });
 }
