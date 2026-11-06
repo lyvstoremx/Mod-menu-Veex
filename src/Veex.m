@@ -404,21 +404,27 @@ static void VXTick(void){
 
         if (g_step == 3) {
             size_t offs[3] = { 0x158, 0x160, 0x570 };
+            void *best = NULL; size_t bestOff = 0, bestSz = 0;
             for (int i = 0; i < 3; i++) {
                 void *l = VXAt(g_match, offs[i]);
                 if (!VXOk(l)) continue;
+                void *it = VXAt(l, 0x10);
                 size_t s = 0;
-                if (!VXRead((char *)l + 0x18, &s, sizeof(s))) continue;
-                if (s > 0 && s < 300) { g_listObj = l; g_listOff = offs[i]; break; }
+                VXRead((char *)l + 0x18, &s, sizeof(s));
+                if (s >= 300) continue;
+                if (s > bestSz) { best = l; bestOff = offs[i]; bestSz = s; }
+                else if (!best && VXOk(it)) { best = l; bestOff = offs[i]; bestSz = s; }
             }
-            if (!g_listObj) {
+            if (!best) {
                 g_retry++;
                 if (g_retry % 300 == 0) VXLog(@"esperando lista (%d)", g_retry);
                 return;
             }
             g_retry = 0;
+            g_listObj = best;
+            g_listOff = bestOff;
             g_step = 4;
-            VXLog(@"paso 4 lista=%p off=0x%zx", g_listObj, g_listOff);
+            VXLog(@"paso 4 lista=%p off=0x%zx sz=%zu", best, bestOff, bestSz);
         }
 
         if (!g_listObj) return;
