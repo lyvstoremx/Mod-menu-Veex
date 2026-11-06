@@ -7,6 +7,7 @@
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
 #import <QuartzCore/QuartzCore.h>
+#import <Security/Security.h>
 #import <dlfcn.h>
 #import <mach-o/dyld.h>
 #import <string.h>
@@ -34,6 +35,8 @@ typedef struct {
     BOOL diag;
     BOOL fovCircle;
     BOOL crosshair;
+    BOOL thin;
+    BOOL stream;
     NSInteger espBits;
     float aimFov;
     UIColor *color;
@@ -90,6 +93,7 @@ static void *g_camCls;
 static void *g_camMain;
 static char g_dbg[220];
 static CFTimeInterval g_last;
+static CFTimeInterval g_lastTouch;
 static CGSize g_lastSize;
 
 static void *g_facadeCls;
@@ -684,7 +688,7 @@ static void VXAimStep(void) {
     CGSize sz = VXSize();
 
     if (g.fovCircle && g.aim) {
-        CGContextSetStrokeColorWithColor(c, [[UIColor colorWithWhite:1 alpha:0.5] CGColor]);
+        CGContextSetStrokeColorWithColor(c, [[UIColor colorWithWhite:1 alpha:0.4] CGColor]);
         CGContextSetLineWidth(c, 1);
         CGFloat r = g.aimFov > 0 ? g.aimFov : 160;
         CGContextStrokeEllipseInRect(c, CGRectMake(sz.width / 2 - r, sz.height / 2 - r, r * 2, r * 2));
@@ -714,7 +718,7 @@ static void VXAimStep(void) {
     memcpy(local, g_snap, sizeof(VXEnt) * n);
     pthread_mutex_unlock(&g_mtx);
 
-    CGContextSetLineWidth(c, 1.2);
+    CGContextSetLineWidth(c, g.thin ? 1.0 : 1.4);
     CGContextSetStrokeColorWithColor(c, col.CGColor);
 
     NSInteger drawn = 0;
@@ -729,7 +733,7 @@ static void VXAimStep(void) {
 
         if (g.espBits & (1 << VXEspBox)) {
             CGContextStrokeRect(c, box);
-            CGContextStrokeRect(c, CGRectInset(box, -1.5, -1.5));
+            if (!g.thin) CGContextStrokeRect(c, CGRectInset(box, -1.5, -1.5));
         }
         if (g.espBits & (1 << VXEspLine)) {
             CGContextMoveToPoint(c, sz.width / 2, sz.height - 42);
@@ -757,9 +761,9 @@ static void VXAimStep(void) {
             if (pct < 0) pct = 0;
             if (pct > 1) pct = 1;
             CGContextSetFillColorWithColor(c, [[UIColor colorWithWhite:0.15 alpha:1] CGColor]);
-            CGContextFillRect(c, CGRectMake(box.origin.x - 6, box.origin.y, 3, rawH));
+            CGContextFillRect(c, CGRectMake(box.origin.x - 5, box.origin.y, 2, rawH));
             CGContextSetFillColorWithColor(c, [[UIColor greenColor] CGColor]);
-            CGContextFillRect(c, CGRectMake(box.origin.x - 6, box.origin.y + rawH * (1 - pct), 3, rawH * pct));
+            CGContextFillRect(c, CGRectMake(box.origin.x - 5, box.origin.y + rawH * (1 - pct), 2, rawH * pct));
             CGContextSetStrokeColorWithColor(c, col.CGColor);
         }
         if (g.espBits & (1 << VXEspName)) {
@@ -769,7 +773,7 @@ static void VXAimStep(void) {
                                NSForegroundColorAttributeName: col }];
         }
         if (g.espBits & (1 << VXEspDist)) {
-            NSString *ds = [NSString stringWithFormat:@"%.0fm", e->dist];
+            NSString *ds = [NSString stringWithFormat:@"%.0f", e->dist];
             [ds drawAtPoint:CGPointMake(box.origin.x, box.origin.y + rawH + 2)
              withAttributes:@{ NSFontAttributeName: [UIFont boldSystemFontOfSize:9],
                                NSForegroundColorAttributeName: col }];
@@ -849,6 +853,8 @@ static void VXAimStep(void) {
         case 109: on = g.fovCircle; break;
         case 110: on = g.crosshair; break;
         case 111: on = g.diag; break;
+        case 115: on = g.thin; break;
+        case 116: on = g.stream; break;
         default: break;
     }
     b.backgroundColor = [UIColor colorWithWhite:0.10 alpha:1];
@@ -858,6 +864,7 @@ static void VXAimStep(void) {
 }
 
 - (void)onChip:(UIButton *)b {
+    g_lastTouch = CACurrentMediaTime();
     switch (b.tag) {
         case 101: g.esp = !g.esp; if (g.esp) [self doBoot]; break;
         case 102: g.espBits ^= (1 << VXEspBox); break;
@@ -873,6 +880,11 @@ static void VXAimStep(void) {
         case 112: [self doDump]; break;
         case 113: g_panel.hidden = YES; break;
         case 114: [self doReset]; break;
+        case 115: g.thin = !g.thin; break;
+        case 116:
+            g.stream = !g.stream;
+            g_panel.hidden = YES;
+            break;
     }
     [self paint:b];
 }
@@ -914,6 +926,11 @@ static void VXAimStep(void) {
     VXShow(@"reset guest...");
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
         @try {
+            NSDictionary *q1 = @{ (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword };
+            SecItemDelete((__bridge CFDictionaryRef)q1);
+            NSDictionary *q2 = @{ (__bridge id)kSecClass: (__bridge id)kSecClassInternetPassword };
+            SecItemDelete((__bridge CFDictionaryRef)q2);
+
             NSArray *keys = @[ @"guest", @"account", @"login", @"session", @"token", @"uid" ];
             NSFileManager *fm = [NSFileManager defaultManager];
             NSString *docs = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
@@ -936,7 +953,7 @@ static void VXAimStep(void) {
                 }
             }
             [d synchronize];
-            VXShow(@"guest reset · cierra y abre el juego");
+            VXShow(@"reset ok · cierra y abre");
         } @catch (NSException *ex) {
             VXShow(@"reset fallo");
         }
@@ -971,6 +988,13 @@ static void VXAimStep(void) {
         }
     }
 
+    if (g_bubble) {
+        CFTimeInterval idle = CACurrentMediaTime() - g_lastTouch;
+        if (g.stream) g_bubble.alpha = 0.06f;
+        else if (idle > 3.0) g_bubble.alpha = 0.28f;
+        else g_bubble.alpha = 1.0f;
+    }
+
     if (g_draw) [g_draw setNeedsDisplay];
     if (g.aim) VXAimStep();
 
@@ -989,17 +1013,19 @@ static void VXAimStep(void) {
     }
 }
 
-- (void)bubbleTapped { g_panel.hidden = !g_panel.hidden; }
+- (void)bubbleTapped {
+    g_lastTouch = CACurrentMediaTime();
+    g_panel.hidden = !g_panel.hidden;
+}
 
 - (void)bubbleDouble {
+    g_lastTouch = CACurrentMediaTime();
     g.esp = !g.esp;
     if (g.esp) [self doBoot];
-    g_bubble.backgroundColor = g.esp
-        ? [UIColor colorWithWhite:0.07 alpha:0.94]
-        : [UIColor colorWithWhite:0.25 alpha:0.94];
 }
 
 - (void)drag:(UIPanGestureRecognizer *)p {
+    g_lastTouch = CACurrentMediaTime();
     CGPoint t = [p translationInView:self];
     CGPoint c = g_bubble.center;
     CGSize s = self.bounds.size;
@@ -1031,8 +1057,11 @@ static void VXBuildMenu(void) {
     g.bg = [UIColor colorWithWhite:0.05 alpha:0.97];
     g.line = [UIColor colorWithWhite:0.28 alpha:1];
     g.espBits = (1 << VXEspBox) | (1 << VXEspDist);
+    g.thin = YES;
+    g.aim = NO;
     g.aimFov = 160;
     g_lastSize = kw.bounds.size;
+    g_lastTouch = CACurrentMediaTime();
 
     g_draw = [[VeexDraw alloc] initWithFrame:kw.bounds];
     g_draw.backgroundColor = [UIColor clearColor];
@@ -1169,9 +1198,12 @@ static void VXBuildMenu(void) {
 
     [sv addSubview:[host label:@"SISTEMA" size:10 color:[UIColor colorWithWhite:0.5 alpha:1] y:y]];
     y += 20;
-    [sv addSubview:[host chip:@"ESTADO" x:14 y:y w:96 tag:112]];
-    [sv addSubview:[host chip:@"RESET GUEST" x:118 y:y w:120 tag:114]];
-    y += 40;
+    [sv addSubview:[host chip:@"SUTIL" x:14 y:y w:72 tag:115]];
+    [sv addSubview:[host chip:@"STREAM" x:94 y:y w:80 tag:116]];
+    [sv addSubview:[host chip:@"ESTADO" x:182 y:y w:96 tag:112]];
+    y += 36;
+    [sv addSubview:[host chip:@"RESET GUEST" x:14 y:y w:130 tag:114]];
+    y += 44;
 
     g_status = [[UILabel alloc] initWithFrame:CGRectMake(14, y, pw - 28, 90)];
     g_status.text = @"listo";
