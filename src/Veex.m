@@ -224,6 +224,8 @@ static UIButton *VXB(NSString *t, CGFloat w, CGFloat h) {
 
 #pragma mark - il2cpp juego
 
+static NSString *VXExcMsg(void *exc);
+
 static void *VXTrigger(void) {
     if (!g_triggerCls) {
         g_triggerCls = VXClass("", "SpawnObjectCrossHairTrigger");
@@ -257,12 +259,14 @@ static void *VXPosMethod(void *tr) {
 
 static void *VXCamera(void) {
     if (!g_camCls) g_camCls = VXClass("UnityEngine", "Camera");
-    if (!g_camCls) return NULL;
+    if (!g_camCls) { g_dbg = @"sin clase cam"; return NULL; }
     void *mm = VXMethod(g_camCls, "get_main", 0);
-    if (!mm) return NULL;
+    if (!mm) { g_dbg = @"sin get_main"; return NULL; }
     void *e = NULL;
     void *c = p_runtime_invoke(mm, NULL, NULL, &e);
-    return (c && !e) ? c : NULL;
+    if (e) { g_dbg = [@"exc cam " stringByAppendingString:VXExcMsg(e)]; return NULL; }
+    if (!c) { g_dbg = @"cam null"; return NULL; }
+    return c;
 }
 
 static BOOL VXWorldToScreen(void *cam, V3 w, CGPoint *out) {
@@ -497,7 +501,7 @@ static int VXResetGuest(NSMutableString *log) {
 - (void)drawRect:(CGRect)rect {
     if (!g.esp) { g_dbg = @"esp off"; return; }
     void *cam = VXCamera();
-    if (!cam) { g_dbg = @"sin camara"; return; }
+    if (!cam) return;
 
     void *trg = VXTrigger();
     if (!trg) { g_dbg = @"sin trigger"; return; }
