@@ -222,6 +222,7 @@ static NSTimeInterval g_lastScan;
 static NSInteger g_entities;
 static int g_armed;
 static int g_built;
+static BOOL g_busy;
 
 static UIWindow *g_win;
 static UIView *g_bubble;
@@ -288,8 +289,11 @@ static void *VXFindDict(void) {
     g_lastScan = ahora;
 
     if (!p_image_class_count || !p_image_get_class || !p_class_get_fields ||
-        !p_field_get_type || !p_type_get_name || !p_field_get_flags) {
-        g_dbg = @"falta api dict";
+        !p_field_get_type || !p_type_get_name) {
+        g_dbg = [NSString stringWithFormat:@"falta api %d%d%d%d%d",
+                 p_image_class_count ? 1 : 0, p_image_get_class ? 1 : 0,
+                 p_class_get_fields ? 1 : 0, p_field_get_type ? 1 : 0,
+                 p_type_get_name ? 1 : 0];
         return NULL;
     }
 
@@ -318,7 +322,7 @@ static void *VXFindDict(void) {
             void *it = NULL;
             void *fd = NULL;
             while ((fd = p_class_get_fields(cls, &it))) {
-                if (!(p_field_get_flags(fd) & 0x10)) continue;
+                if (p_field_get_flags && !(p_field_get_flags(fd) & 0x10)) continue;
                 void *ft = p_field_get_type(fd);
                 char *tn = ft ? p_type_get_name(ft) : NULL;
                 if (!tn || !strstr(tn, "Dictionary")) continue;
@@ -402,9 +406,11 @@ static void VXDump(void) {
     if (p_thread_attach) p_thread_attach(d);
 
     if (!p_image_class_count || !p_image_get_class || !p_class_get_fields ||
-        !p_field_get_name || !p_field_get_type || !p_class_get_name ||
-        !p_class_get_namespace || !p_method_get_param) {
-        VXSay(@"dump: api falta");
+        !p_field_get_name || !p_field_get_type || !p_class_get_name) {
+        VXSay([NSString stringWithFormat:@"dump api %d%d%d%d%d%d",
+               p_image_class_count ? 1 : 0, p_image_get_class ? 1 : 0,
+               p_class_get_fields ? 1 : 0, p_field_get_name ? 1 : 0,
+               p_field_get_type ? 1 : 0, p_class_get_name ? 1 : 0]);
         return;
     }
 
@@ -433,7 +439,7 @@ static void VXDump(void) {
             if (!cls) continue;
             const char *nm = p_class_get_name(cls);
             if (!nm) continue;
-            const char *ns = p_class_get_namespace(cls);
+            const char *ns = p_class_get_namespace ? p_class_get_namespace(cls) : "";
             fprintf(f, "C %s.%s\n", ns ? ns : "", nm);
             clases++;
 
@@ -448,20 +454,15 @@ static void VXDump(void) {
                 campos++;
             }
 
-            void *it2 = NULL;
-            void *mm = NULL;
-            while ((mm = p_class_get_methods(cls, &it2))) {
-                const char *mn = p_method_get_name(mm);
-                if (!mn) continue;
-                fprintf(f, "  M %s(", mn);
-                uint32_t pc = p_method_get_param_count(mm);
-                for (uint32_t k = 0; k < pc; k++) {
-                    void *pt = p_method_get_param(mm, k);
-                    char *ptn = pt ? p_type_get_name(pt) : NULL;
-                    fprintf(f, "%s%s", k ? "," : "", ptn ? ptn : "?");
+            if (p_class_get_methods && p_method_get_name) {
+                void *it2 = NULL;
+                void *mm = NULL;
+                while ((mm = p_class_get_methods(cls, &it2))) {
+                    const char *mn = p_method_get_name(mm);
+                    if (!mn) continue;
+                    fprintf(f, "  M %s\n", mn);
+                    metodos++;
                 }
-                fprintf(f, ")\n");
-                metodos++;
             }
         }
     }
@@ -767,7 +768,7 @@ static int VXResetGuest(NSMutableString *log) {
 - (void)profileChanged:(UISegmentedControl *)s;
 - (void)chip:(UIButton *)b;
 - (void)dumpSubir;
-- (void)subir;
+- (void)enviar:(NSData *)d modo:(int)m;
 - (void)close;
 @end
 
@@ -804,7 +805,7 @@ static void VXShowResetCard(void) {
 
 - (void)tick {
     if (g.esp && g_draw) [(VeexDraw *)g_draw setNeedsDisplay];
-    if (g_diag && g_status) g_status.text = g_dbg ?: @"...";
+    if (g_diag && g_status && !g_busy) g_status.text = g_dbg ?: @"...";
 }
 
 - (void)bubbleTapped {
@@ -860,34 +861,44 @@ static void VXShowResetCard(void) {
 }
 
 - (void)dumpSubir {
+    g_busy = YES;
     g_status.text = @"dump...";
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         VXDump();
-        dispatch_async(dispatch_get_main_queue(), ^{ [self subir]; });
+        NSString *p = [[NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject]
+                       stringByAppendingPathComponent:@"veexdump.txt"];
+        NSData *d = [NSData dataWithContentsOfFile:p];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (!d.length) { g_status.text = @"sin dump"; return; }
+            [self enviar:d modo:0];
+        });
     });
 }
 
-- (void)subir {
-    NSString *p = [[NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject]
-                   stringByAppendingPathComponent:@"veexdump.txt"];
-    NSData *d = [NSData dataWithContentsOfFile:p];
-    if (!d.length) { g_status.text = @"sin dump"; return; }
+- (void)enviar:(NSData *)d modo:(int)m {
+    g_status.text = [NSString stringWithFormat:@"subiendo %lu KB t%d", (unsigned long)(d.length / 1024), m];
 
-    g_status.text = [NSString stringWithFormat:@"subiendo %lu KB", (unsigned long)(d.length / 1024)];
-    NSString *b = @"----veexb";
-    NSMutableData *body = [NSMutableData data];
-    [body appendData:[[NSString stringWithFormat:@"--%@\r\n", b] dataUsingEncoding:NSUTF8StringEncoding]];
-    [body appendData:[@"Content-Disposition: form-data; name=\"file\"; filename=\"veexdump.txt\"\r\n" dataUsingEncoding:NSUTF8StringEncoding]];
-    [body appendData:[@"Content-Type: text/plain\r\n\r\n" dataUsingEncoding:NSUTF8StringEncoding]];
-    [body appendData:d];
-    [body appendData:[[NSString stringWithFormat:@"\r\n--%@--\r\n", b] dataUsingEncoding:NSUTF8StringEncoding]];
-
-    NSMutableURLRequest *r = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://0x0.st"]];
-    r.HTTPMethod = @"POST";
+    NSMutableURLRequest *r;
+    if (m == 0) {
+        NSString *b = @"----veexb";
+        NSMutableData *body = [NSMutableData data];
+        [body appendData:[[NSString stringWithFormat:@"--%@\r\n", b] dataUsingEncoding:NSUTF8StringEncoding]];
+        [body appendData:[@"Content-Disposition: form-data; name=\"file\"; filename=\"veexdump.txt\"\r\n" dataUsingEncoding:NSUTF8StringEncoding]];
+        [body appendData:[@"Content-Type: text/plain\r\n\r\n" dataUsingEncoding:NSUTF8StringEncoding]];
+        [body appendData:d];
+        [body appendData:[[NSString stringWithFormat:@"\r\n--%@--\r\n", b] dataUsingEncoding:NSUTF8StringEncoding]];
+        r = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://0x0.st"]];
+        r.HTTPMethod = @"POST";
+        [r setValue:[NSString stringWithFormat:@"multipart/form-data; boundary=%@", b] forHTTPHeaderField:@"Content-Type"];
+        r.HTTPBody = body;
+    } else {
+        r = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://paste.rs"]];
+        r.HTTPMethod = @"POST";
+        [r setValue:@"text/plain" forHTTPHeaderField:@"Content-Type"];
+        r.HTTPBody = d;
+    }
     r.timeoutInterval = 240;
-    [r setValue:[NSString stringWithFormat:@"multipart/form-data; boundary=%@", b] forHTTPHeaderField:@"Content-Type"];
     [r setValue:@"Mozilla/5.0 (iPhone)" forHTTPHeaderField:@"User-Agent"];
-    r.HTTPBody = body;
 
     [[[NSURLSession sharedSession] dataTaskWithRequest:r
         completionHandler:^(NSData *rd, NSURLResponse *rs, NSError *e) {
@@ -896,14 +907,16 @@ static void VXShowResetCard(void) {
                 if (s.length && [s containsString:@"http"]) {
                     g_status.text = s;
                     UIPasteboard.generalPasteboard.string = s;
-                } else {
-                    g_status.text = e ? e.localizedDescription : @"subida fallo";
+                    return;
                 }
+                if (m == 0) { [self enviar:d modo:1]; return; }
+                g_status.text = e ? e.localizedDescription : @"subida fallo";
             });
         }] resume];
 }
 
 - (void)switchChanged:(UISwitch *)s {
+    g_busy = NO;
     switch (s.tag) {
         case 1001: g.esp = s.isOn; break;
         case 1002: g.aim = s.isOn; break;
