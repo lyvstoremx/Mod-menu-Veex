@@ -121,9 +121,19 @@ static void *VXClassIn(const char *asmNeedle, const char *ns, const char *name) 
 }
 
 static void *VXClass(const char *ns, const char *name) {
-    void *c = VXClassIn("Assembly-CSharp", ns, name);
-    if (!c) c = VXClassIn("mscorlib", ns, name);
-    return c;
+    if (!p_domain_get || !p_domain_get_assemblies) return NULL;
+    size_t n = 0;
+    void **as = p_domain_get_assemblies(p_domain_get(), &n);
+    if (!as) return NULL;
+    for (size_t i = 0; i < n; i++) {
+        void *a = *(void **)((char *)as + 0x20 + i * 8);
+        if (!a) continue;
+        void *img = p_assembly_get_image(a);
+        if (!img) continue;
+        void *c = p_class_from_name(img, ns, name);
+        if (c) return c;
+    }
+    return NULL;
 }
 
 static void *VXMethod(void *cls, const char *name, int argc) {
