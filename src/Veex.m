@@ -181,8 +181,10 @@ static void *VXClsOf(void *obj) {
 static struct { BOOL esp, aim, fire, visOnly; CGFloat fov; UIColor *color; int profile; } g;
 
 static void *g_triggerCls, *g_camCls, *g_dictField, *g_dictCls;
+static void *kImgs[512];
+static size_t kCounts[512];
+static int kImgN;
 static size_t g_trOff;
-static NSTimeInterval g_lastScan;
 static NSInteger g_entities;
 static int g_armed, g_built;
 static BOOL g_busy;
@@ -234,24 +236,25 @@ static BOOL VXDictOK(void *dict) {
     return VXPtr(e) && c > 0 && c <= 512;
 }
 
-static void *VXFindDict(void) {
-    if (g_dictField) {
-        void *d = NULL;
-        p_field_static_get_value(g_dictField, &d);
-        if (VXDictOK(d)) return d;
-    }
-    NSTimeInterval ahora = [NSDate timeIntervalSinceReferenceDate];
-    if (g_lastScan && ahora - g_lastScan < 2.0) return NULL;
-    g_lastScan = ahora;
+static size_t VXImgCount(void *img) {
+    for (int i = 0; i < kImgN; i++) if (kImgs[i] == img) return kCounts[i];
+    size_t c = 0;
+    if (p_image_class_count) c = p_image_class_count(img);
+    else while (c < 40000 && p_image_get_class(img, (uint32_t)c)) c++;
+    if (kImgN < 512) { kImgs[kImgN] = img; kCounts[kImgN] = c; kImgN++; }
+    return c;
+}
 
+static void VXDiscover(void) {
+    if (g_dictField) return;
     if (!p_image_get_class || !p_class_get_fields || !p_field_get_type || !p_type_get_name) {
         g_dbg = @"falta api dict";
-        return NULL;
+        return;
     }
 
     size_t n = 0;
     void **as = p_domain_get_assemblies(p_domain_get(), &n);
-    if (!as) return NULL;
+    if (!as) return;
 
     int prob = 0;
     for (size_t i = 0; i < n; i++) {
@@ -260,10 +263,10 @@ static void *VXFindDict(void) {
         void *img = p_assembly_get_image(a);
         if (!img) continue;
 
-        size_t cc = p_image_class_count ? p_image_class_count(img) : 40000;
+        size_t cc = VXImgCount(img);
         for (size_t k = 0; k < cc; k++) {
             void *cls = p_image_get_class(img, (uint32_t)k);
-            if (!cls) { if (p_image_class_count) continue; break; }
+            if (!cls) continue;
             const char *cn = p_class_get_name(cls);
             if (!cn) continue;
             if (!(strstr(cn, "Spawn") || strstr(cn, "Manager") || strstr(cn, "Entity") ||
@@ -282,11 +285,20 @@ static void *VXFindDict(void) {
                 if (!VXDictOK(v)) continue;
                 g_dictField = fd;
                 g_dictCls = cls;
-                return v;
+                g_dbg = @"dict lista";
+                return;
             }
         }
     }
     g_dbg = [NSString stringWithFormat:@"sin dict %d", prob];
+}
+
+static void *VXFindDict(void) {
+    if (!g_dictField) return NULL;
+    void *d = NULL;
+    p_field_static_get_value(g_dictField, &d);
+    if (VXDictOK(d)) return d;
+    g_dbg = @"dict vacia";
     return NULL;
 }
 
@@ -299,17 +311,23 @@ static void *VXTrMethod(void *cls) {
     return mm;
 }
 
+static BOOL VXValidObj(void *o) {
+    if (!VXPtr(o)) return NO;
+    void *k = *(void **)o;
+    if (!VXPtr(k)) return NO;
+    if (!p_class_get_name) return YES;
+    const char *n = p_class_get_name(k);
+    return n && n[0];
+}
+
 static void *VXTransformOf(void *obj) {
-    if (!VXPtr(obj)) return NULL;
+    if (!VXValidObj(obj)) return NULL;
     void *mm = VXTrMethod(VXClsOf(obj));
-    if (mm) {
-        void *e = NULL;
-        void *r = p_runtime_invoke(mm, obj, NULL, &e);
-        if (r && !e && VXPtr(r)) return r;
-    }
-    size_t off = g_trOff ? g_trOff : 0x50;
-    void *t = *(void **)((char *)obj + off);
-    return VXPtr(t) ? t : NULL;
+    if (!mm) return NULL;
+    void *e = NULL;
+    void *r = p_runtime_invoke(mm, obj, NULL, &e);
+    if (!r || e || !VXPtr(r)) return NULL;
+    return r;
 }
 
 static void *VXPosMethod(void *tr) {
@@ -383,10 +401,10 @@ static void VXDump(void) {
         fprintf(f, "\n=== %s ===\n", inm ? inm : "?");
         VXSay([NSString stringWithFormat:@"dump %s %d", inm ? inm : "?", clases]);
 
-        size_t cc = p_image_class_count ? p_image_class_count(img) : 40000;
+        size_t cc = VXImgCount(img);
         for (size_t c = 0; c < cc; c++) {
             void *cls = p_image_get_class(img, (uint32_t)c);
-            if (!cls) { if (p_image_class_count) continue; break; }
+            if (!cls) continue;
             const char *nm = p_class_get_name(cls);
             if (!nm) continue;
             if (!(strstr(nm, "Player") || strstr(nm, "Spawn") || strstr(nm, "Manager") ||
@@ -601,7 +619,7 @@ static int VXResetGuest(NSMutableString *log) {
     char *entries = *(char **)((char *)dict + 0x18);
     int count = *(int *)((char *)dict + 0x20);
     g_dbg = [NSString stringWithFormat:@"cnt %d", count];
-    if (!VXPtr(entries) || count <= 0 || count > 512) return;
+    if (!VXPtr(entries) || count <= 0 || count > 300) return;
 
     CGContextRef c = UIGraphicsGetCurrentContext();
     CGContextSetLineWidth(c, 1.2);
@@ -610,8 +628,8 @@ static int VXResetGuest(NSMutableString *log) {
     NSInteger drawn = 0;
     for (int i = 0; i < count; i++) {
         void *ent = *(void **)(entries + i * 24 + 16);
-        if (!VXPtr(ent)) ent = *(void **)(entries + i * 24 + 8);
-        if (!VXPtr(ent)) continue;
+        if (!VXValidObj(ent)) ent = *(void **)(entries + i * 24 + 8);
+        if (!VXValidObj(ent)) continue;
         void *tr = VXTransformOf(ent);
         if (!tr) continue;
         void *mPos = VXPosMethod(tr);
@@ -900,8 +918,7 @@ static void VXBuildMenu(void) {
     [x addTarget:g_panel action:@selector(close) forControlEvents:UIControlEventTouchUpInside];
     [head addSubview:x];
 
-    UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:g_panel action:@selector(drag:)];
-    [head addGestureRecognizer:pan];
+    [head addGestureRecognizer:[[UIPanGestureRecognizer alloc] initWithTarget:g_panel action:@selector(drag:)]];
 
     UIScrollView *sv = [[UIScrollView alloc] initWithFrame:CGRectMake(0, 44, pw, ph - 44)];
     sv.delaysContentTouches = NO;
@@ -1005,6 +1022,14 @@ static void VXBuildMenu(void) {
                                                                           action:@selector(bubbleTapped)]];
     [g_bubble addGestureRecognizer:[[UIPanGestureRecognizer alloc] initWithTarget:g_panel
                                                                           action:@selector(dragBubble:)]];
+
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        for (int i = 0; i < 600; i++) {
+            if (g_dictField) return;
+            VXDiscover();
+            sleep(2);
+        }
+    });
 
     g_link = [CADisplayLink displayLinkWithTarget:g_panel selector:@selector(tick)];
     [g_link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
