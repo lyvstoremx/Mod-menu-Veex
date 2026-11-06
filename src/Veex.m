@@ -240,7 +240,7 @@ static size_t VXImgCount(void *img) {
     for (int i = 0; i < kImgN; i++) if (kImgs[i] == img) return kCounts[i];
     size_t c = 0;
     if (p_image_class_count) c = p_image_class_count(img);
-    else while (c < 40000 && p_image_get_class(img, (uint32_t)c)) c++;
+    else while (c < 20000 && p_image_get_class(img, (uint32_t)c)) c++;
     if (kImgN < 512) { kImgs[kImgN] = img; kCounts[kImgN] = c; kImgN++; }
     return c;
 }
@@ -248,7 +248,7 @@ static size_t VXImgCount(void *img) {
 static void VXDiscover(void) {
     if (g_dictField) return;
     if (!p_image_get_class || !p_class_get_fields || !p_field_get_type || !p_type_get_name) {
-        g_dbg = @"falta api dict";
+        VXSay(@"falta api dict");
         return;
     }
 
@@ -285,12 +285,12 @@ static void VXDiscover(void) {
                 if (!VXDictOK(v)) continue;
                 g_dictField = fd;
                 g_dictCls = cls;
-                g_dbg = @"dict lista";
+                VXSay(@"dict lista");
                 return;
             }
         }
     }
-    g_dbg = [NSString stringWithFormat:@"sin dict %d", prob];
+    VXSay([NSString stringWithFormat:@"sin dict %d", prob]);
 }
 
 static void *VXFindDict(void) {
@@ -1024,6 +1024,7 @@ static void VXBuildMenu(void) {
                                                                           action:@selector(dragBubble:)]];
 
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        if (p_thread_attach && p_domain_get) p_thread_attach(p_domain_get());
         for (int i = 0; i < 600; i++) {
             if (g_dictField) return;
             VXDiscover();
@@ -1041,6 +1042,7 @@ __attribute__((constructor)) static void VXInit(void) {
 
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(6 * NSEC_PER_SEC)),
                    dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        if (p_thread_attach && p_domain_get) p_thread_attach(p_domain_get());
         for (int i = 0; i < 600; i++) {
             if (VXResolve()) {
                 void *c = VXClass("", "SpawnObjectCrossHairTrigger");
