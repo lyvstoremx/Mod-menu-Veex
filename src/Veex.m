@@ -240,7 +240,7 @@ static size_t VXImgCount(void *img) {
     for (int i = 0; i < kImgN; i++) if (kImgs[i] == img) return kCounts[i];
     size_t c = 0;
     if (p_image_class_count) c = p_image_class_count(img);
-    else while (c < 20000 && p_image_get_class(img, (uint32_t)c)) c++;
+    else while (c < 5000 && p_image_get_class(img, (uint32_t)c)) c++;
     if (kImgN < 512) { kImgs[kImgN] = img; kCounts[kImgN] = c; kImgN++; }
     return c;
 }
@@ -302,15 +302,6 @@ static void *VXFindDict(void) {
     return NULL;
 }
 
-static void *VXTrMethod(void *cls) {
-    static void *k[16], *m[16];
-    static int n;
-    for (int i = 0; i < n; i++) if (k[i] == cls) return m[i];
-    void *mm = VXMethod(cls, "get_transform", 0);
-    if (n < 16) { k[n] = cls; m[n] = mm; n++; }
-    return mm;
-}
-
 static BOOL VXValidObj(void *o) {
     if (!VXPtr(o)) return NO;
     void *k = *(void **)o;
@@ -318,6 +309,33 @@ static BOOL VXValidObj(void *o) {
     if (!p_class_get_name) return YES;
     const char *n = p_class_get_name(k);
     return n && n[0];
+}
+
+static void VXReport(void) {
+    if (!VXResolve()) { VXSay(@"r sin il2cpp"); return; }
+    if (p_thread_attach) p_thread_attach(p_domain_get());
+    void *dict = VXFindDict();
+    if (!dict) { VXSay(@"r sin dict"); return; }
+    char *entries = *(char **)((char *)dict + 0x18);
+    int count = *(int *)((char *)dict + 0x20);
+    NSMutableString *s = [NSMutableString stringWithFormat:@"r n=%d ", count];
+    for (int i = 0; i < count && i < 20; i++) {
+        void *ent = *(void **)(entries + i * 24 + 16);
+        if (!VXValidObj(ent)) ent = *(void **)(entries + i * 24 + 8);
+        if (!VXValidObj(ent)) { [s appendString:@"?- "]; continue; }
+        const char *cn = p_class_get_name(*(void **)ent);
+        [s appendFormat:@"%s ", cn ? cn : "?"];
+    }
+    VXSay(s);
+}
+
+static void *VXTrMethod(void *cls) {
+    static void *k[16], *m[16];
+    static int n;
+    for (int i = 0; i < n; i++) if (k[i] == cls) return m[i];
+    void *mm = VXMethod(cls, "get_transform", 0);
+    if (n < 16) { k[n] = cls; m[n] = mm; n++; }
+    return mm;
 }
 
 static void *VXTransformOf(void *obj) {
@@ -723,7 +741,6 @@ static void VXShowResetCard(void) {
 @implementation VeexPanel
 
 - (void)tick {
-    if (g.esp && g_draw) [(VeexDraw *)g_draw setNeedsDisplay];
     if (g_diag && g_status && !g_busy) g_status.text = g_dbg ?: @"...";
 }
 
@@ -830,7 +847,10 @@ static void VXShowResetCard(void) {
 - (void)switchChanged:(UISwitch *)s {
     g_busy = NO;
     switch (s.tag) {
-        case 1001: g.esp = s.isOn; break;
+        case 1001:
+            g.esp = s.isOn;
+            if (g.esp) dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{ VXReport(); });
+            break;
         case 1002: g.aim = s.isOn; break;
         case 1003: g.fire = s.isOn; break;
         case 1004: g.visOnly = s.isOn; break;
