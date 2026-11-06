@@ -542,10 +542,13 @@ static void VXTick(void){
 
             float h = fabsf(pt.y - ph.y);
             if (h < 4 || h > sz.height * 0.6f) { g_D++; continue; }
-            float w = h * 0.5f;
+
+            float w = h * 0.62f;
+            if (w < 10) w = 10;
 
             float top = (ph.y < pt.y) ? ph.y : pt.y;
-            float left = ph.x - w / 2.0f;
+            float mid = (ph.x + pt.x) / 2.0f;
+            float left = mid - w / 2.0f;
 
             if (g_boxN < 6) {
                 VXLog(@"box %d x=%.0f y=%.0f h=%.0f cam=%d head=(%.1f,%.1f) scr=%.0fx%.0f",
