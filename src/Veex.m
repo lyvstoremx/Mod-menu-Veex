@@ -256,7 +256,7 @@ static int VXPurga(void) {
 @implementation VXWindow
 - (UIView *)hitTest:(CGPoint)p withEvent:(UIEvent *)e {
     UIView *panel = self.subviews.firstObject;
-    if (panel && [panel pointInside:p withEvent:e]) return panel;
+    if (panel && [panel pointInside:p withEvent:e]) return [super hitTest:p withEvent:e];
     return nil;
 }
 @end
