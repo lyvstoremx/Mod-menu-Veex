@@ -121,13 +121,21 @@ static BOOL VXResolve(void) {
     return YES;
 }
 
+static void *VXAsmAt(void **as, size_t i) {
+    void *a = ((void **)as)[i];
+    void *img = a ? p_assembly_get_image(a) : NULL;
+    if (img && p_image_get_name(img)) return a;
+    a = *(void **)((char *)as + 0x20 + i * 8);
+    return a;
+}
+
 static void *VXAssembly(const char *needle) {
     if (!p_domain_get || !p_domain_get_assemblies) return NULL;
     size_t n = 0;
     void **as = p_domain_get_assemblies(p_domain_get(), &n);
     if (!as) return NULL;
     for (size_t i = 0; i < n; i++) {
-        void *a = ((void **)as)[i];
+        void *a = VXAsmAt(as, i);
         if (!a) continue;
         void *img = p_assembly_get_image(a);
         if (!img) continue;
@@ -150,7 +158,7 @@ static void *VXClass(const char *ns, const char *name) {
     void **as = p_domain_get_assemblies(p_domain_get(), &n);
     if (!as) return NULL;
     for (size_t i = 0; i < n; i++) {
-        void *a = ((void **)as)[i];
+        void *a = VXAsmAt(as, i);
         if (!a) continue;
         void *img = p_assembly_get_image(a);
         if (!img) continue;
@@ -319,6 +327,13 @@ static void VXDump(void) {
     if (!d) { VXSay(@"dump: sin dominio"); return; }
     if (p_thread_attach) p_thread_attach(d);
 
+    if (!p_image_class_count || !p_image_get_class || !p_class_get_fields ||
+        !p_field_get_name || !p_field_get_type || !p_class_get_name ||
+        !p_class_get_namespace || !p_method_get_param) {
+        VXSay(@"dump: api falta");
+        return;
+    }
+
     size_t n = 0;
     void **as = p_domain_get_assemblies(d, &n);
     if (!as) { VXSay(@"dump: sin ensamblados"); return; }
@@ -330,7 +345,7 @@ static void VXDump(void) {
 
     int clases = 0, campos = 0, metodos = 0;
     for (size_t i = 0; i < n; i++) {
-        void *a = ((void **)as)[i];
+        void *a = VXAsmAt(as, i);
         if (!a) continue;
         void *img = p_assembly_get_image(a);
         if (!img) continue;
@@ -342,17 +357,19 @@ static void VXDump(void) {
             void *cls = p_image_get_class(img, (uint32_t)c);
             if (!cls) continue;
             const char *nm = p_class_get_name(cls);
+            if (!nm) continue;
             const char *ns = p_class_get_namespace(cls);
-            fprintf(f, "C %s.%s\n", ns ? ns : "", nm ? nm : "?");
+            fprintf(f, "C %s.%s\n", ns ? ns : "", nm);
             clases++;
 
             void *it = NULL;
             void *fd = NULL;
             while ((fd = p_class_get_fields(cls, &it))) {
                 const char *fn = p_field_get_name(fd);
+                if (!fn) continue;
                 void *ft = p_field_get_type(fd);
                 char *ftn = ft ? p_type_get_name(ft) : NULL;
-                fprintf(f, "  F %s %s @%zu\n", ftn ? ftn : "?", fn ? fn : "?", p_field_get_offset(fd));
+                fprintf(f, "  F %s %s @%zu\n", ftn ? ftn : "?", fn, p_field_get_offset(fd));
                 campos++;
             }
 
@@ -360,7 +377,8 @@ static void VXDump(void) {
             void *mm = NULL;
             while ((mm = p_class_get_methods(cls, &it2))) {
                 const char *mn = p_method_get_name(mm);
-                fprintf(f, "  M %s(", mn ? mn : "?");
+                if (!mn) continue;
+                fprintf(f, "  M %s(", mn);
                 uint32_t pc = p_method_get_param_count(mm);
                 for (uint32_t k = 0; k < pc; k++) {
                     void *pt = p_method_get_param(mm, k);
@@ -1023,13 +1041,14 @@ __attribute__((constructor)) static void VXInit(void) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(12 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{ VXBuildMenu(); });
 
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(6 * NSEC_PER_SEC)),
+                   dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         for (int i = 0; i < 600; i++) {
             if (VXResolve()) {
                 void *c = VXClass("", "SpawnObjectCrossHairTrigger");
                 if (c) { g_triggerCls = c; g_trOff = VXFieldOffset(c, "transform"); return; }
             }
-            usleep(200000);
+            usleep(300000);
         }
     });
 }
