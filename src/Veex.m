@@ -58,7 +58,6 @@ static const char *(*p_class_get_name)(void *);
 static void *(*p_class_get_parent)(void *);
 
 static BOOL g_ready = NO;
-static void *g_img = NULL;
 static void *g_facade = NULL;
 static void *g_match = NULL;
 static void *g_local = NULL;
@@ -100,8 +99,7 @@ static void VXResolve(void){
         void *img = p_assembly_get_image(asms[i]);
         if (!img) continue;
         for (int k = 0; k < 3 && !g_facade; k++) {
-            void *c = p_class_from_name(img, nss[k], "GameFacade");
-            if (c) { g_facade = c; g_img = img; }
+            g_facade = p_class_from_name(img, nss[k], "GameFacade");
         }
     }
     if (!g_facade) { VXLog(@"FALLO clase GameFacade"); return; }
@@ -113,31 +111,36 @@ static void VXResolve(void){
 static BOOL VXGetCamera(void){
     if (g_projCount > 0 && VXOk(g_cam)) return YES;
 
-    void *camClass = p_class_from_name(g_img, "UnityEngine", "Camera");
-    if (!camClass) { VXLog(@"FALLO clase Camera"); return NO; }
+    void *mg = VXAt(g_facade, 0x8);
+    if (!VXOk(mg)) return NO;
+
+    size_t moffs[3] = { 0xD8, 0xD0, 0xE0 };
+    void *ccm = NULL;
+    for (int i = 0; i < 3 && !VXOk(ccm); i++) ccm = VXAt(mg, moffs[i]);
+    if (!VXOk(ccm)) return NO;
+
+    size_t coffs[4] = { 0x20, 0x18, 0x28, 0x10 };
+    void *cam = NULL;
+    for (int i = 0; i < 4 && !VXOk(cam); i++) cam = VXAt(ccm, coffs[i]);
+    if (!VXOk(cam)) return NO;
+
+    void *klass = VXAt(cam, 0);
+    if (!VXOk(klass)) return NO;
 
     if (g_projCount == 0) {
         const char *nm[4] = { "WorldToViewportPoint_Injected", "WorldToViewportPoint",
                               "WorldToScreenPoint_Injected", "WorldToScreenPoint" };
         for (int i = 0; i < 4; i++) {
-            void *m = p_class_get_method_from_name(camClass, nm[i], 1);
+            void *m = p_class_get_method_from_name(klass, nm[i], 1);
             if (m) g_m_proj[g_projCount++] = m;
         }
         VXLog(@"proj resueltos=%d", g_projCount);
     }
     if (g_projCount == 0) return NO;
 
-    void *gm = p_class_get_method_from_name(camClass, "get_main", 0);
-    if (gm) {
-        void *exc = NULL;
-        void *c = NULL;
-        @try { c = p_runtime_invoke(gm, NULL, NULL, &exc); } @catch (...) { c = NULL; }
-        if (VXOk(c)) { g_cam = c; VXLog(@"cam main=%p", c); return YES; }
-        VXLog(@"get_main devolvio %p", c);
-    } else {
-        VXLog(@"FALLO get_main");
-    }
-    return NO;
+    g_cam = cam;
+    VXLog(@"cam=%p proj=%d", cam, g_projCount);
+    return YES;
 }
 
 static void VXPrepLocal(void){
@@ -350,16 +353,14 @@ static void VXTick(void){
             if (!g_ready) { VXLog(@"FALLO paso 1"); VXStopESP(); return; }
         }
 
-        if (g_projCount == 0 || !VXOk(g_cam)) {
-            VXGetCamera();
-        }
+        if (g_projCount == 0 || !VXOk(g_cam)) VXGetCamera();
 
         if (g_step == 1) {
             void *f = VXAt(g_facade, 0x8);
             g_match = f ? VXAt(f, 0x90) : NULL;
             if (!VXOk(g_match)) {
                 g_retry++;
-                if (g_retry > 1200) { VXLog(@"FALLO paso 2 sin match"); VXStopESP(); }
+                if (g_retry % 300 == 0) VXLog(@"esperando match (%d) cam=%p proj=%d", g_retry, g_cam, g_projCount);
                 return;
             }
             g_retry = 0;
@@ -387,7 +388,7 @@ static void VXTick(void){
             }
             if (!g_listObj) {
                 g_retry++;
-                if (g_retry > 600) { VXLog(@"FALLO paso 4 sin lista"); VXStopESP(); }
+                if (g_retry % 300 == 0) VXLog(@"esperando lista (%d)", g_retry);
                 return;
             }
             g_retry = 0;
