@@ -528,9 +528,11 @@ static void VXTick(void){
             if (!VXName(pl)) { g_D++; continue; }
 
             CGPoint head;
+            BOOL viaCam = NO;
             if (!VXHead(pl, &head)) {
                 void *tf = VXAt(pl, 0x3E8);
                 if (!VXOk(tf) || !VXPos(tf, &head)) { g_D++; continue; }
+                viaCam = YES;
             }
             CGPoint toe = CGPointMake(head.x, head.y - 1.75f);
 
@@ -544,6 +546,11 @@ static void VXTick(void){
 
             float top = (ph.y < pt.y) ? ph.y : pt.y;
             float left = ph.x - w / 2.0f;
+
+            if (g_boxN < 6) {
+                VXLog(@"box %d x=%.0f y=%.0f h=%.0f cam=%d head=(%.1f,%.1f) scr=%.0fx%.0f",
+                      g_boxN, left, top, h, viaCam, head.x, head.y, sz.width, sz.height);
+            }
 
             g_box[g_boxN][0] = CGPointMake(left, top);
             g_box[g_boxN][1] = CGPointMake(left + w, top);
