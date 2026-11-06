@@ -56,9 +56,12 @@ static void *(*p_class_get_method_from_name)(void *, const char *, int);
 static void *(*p_runtime_invoke)(void *, void *, void **, void **);
 static const char *(*p_class_get_name)(void *);
 static void *(*p_class_get_parent)(void *);
+static void *(*p_class_get_field_from_name)(void *, const char *);
+static void  (*p_field_static_get_value)(void *, void *);
 
 static BOOL g_ready = NO;
 static void *g_facade = NULL;
+static void *g_fCurrentMatchGame = NULL;
 static void *g_match = NULL;
 static void *g_local = NULL;
 static void *g_cam = NULL;
@@ -68,6 +71,22 @@ static void *g_m_getPosition = NULL;
 static void *g_m_proj[4] = {NULL, NULL, NULL, NULL};
 static int   g_projCount = 0;
 static BOOL  g_swept = NO;
+
+static void *VXFacadeObj(void){
+    void *sb = VXAt(g_facade, 0xB8);
+    if (VXOk(sb)) {
+        void *o = VXAt(sb, 0x8);
+        if (VXOk(o) && (VXOk(VXAt(o, 0x90)) || VXOk(VXAt(o, 0xD8)))) return o;
+        if (VXOk(o)) return o;
+    }
+    void *out = NULL;
+    if (g_fCurrentMatchGame && p_field_static_get_value) {
+        void *exc = NULL;
+        @try { p_field_static_get_value(g_fCurrentMatchGame, &out); } @catch (...) { out = NULL; }
+    }
+    if (!VXOk(out)) out = VXAt(g_facade, 0x8);
+    return VXOk(out) ? out : NULL;
+}
 
 static void VXResolve(void){
     if (g_ready) return;
@@ -80,6 +99,8 @@ static void VXResolve(void){
     p_runtime_invoke             = dlsym(RTLD_DEFAULT, "il2cpp_runtime_invoke");
     p_class_get_name             = dlsym(RTLD_DEFAULT, "il2cpp_class_get_name");
     p_class_get_parent           = dlsym(RTLD_DEFAULT, "il2cpp_class_get_parent");
+    p_class_get_field_from_name  = dlsym(RTLD_DEFAULT, "il2cpp_class_get_field_from_name");
+    p_field_static_get_value     = dlsym(RTLD_DEFAULT, "il2cpp_field_static_get_value");
 
     if (!p_domain_get || !p_domain_get_assemblies || !p_assembly_get_image ||
         !p_class_from_name || !p_class_get_method_from_name || !p_runtime_invoke) {
@@ -104,14 +125,18 @@ static void VXResolve(void){
     }
     if (!g_facade) { VXLog(@"FALLO clase GameFacade"); return; }
 
-    VXLog(@"api OK facade=%p", g_facade);
+    if (p_class_get_field_from_name) {
+        g_fCurrentMatchGame = p_class_get_field_from_name(g_facade, "CurrentMatchGame");
+    }
+    void *sb = VXAt(g_facade, 0xB8);
+    VXLog(@"api OK facade=%p campo=%p sb=%p", g_facade, g_fCurrentMatchGame, sb);
     g_ready = YES;
 }
 
 static BOOL VXGetCamera(void){
     if (g_projCount > 0 && VXOk(g_cam)) return YES;
 
-    void *mg = VXAt(g_facade, 0x8);
+    void *mg = VXFacadeObj();
     if (!VXOk(mg)) return NO;
 
     size_t moffs[3] = { 0xD8, 0xD0, 0xE0 };
@@ -163,7 +188,7 @@ static void VXSweep(void *match){
     void *mk = VXAt(match, 0);
     VXLog(@"--- SWEEP match=%p clase=%s ---", match,
           (mk && p_class_get_name) ? p_class_get_name(mk) : "?");
-    for (size_t off = 0x80; off <= 0x200; off += 8) {
+    for (size_t off = 0x80; off <= 0x600; off += 8) {
         void *p = VXAt(match, off);
         if (!VXOk(p)) continue;
         size_t s = 0;
@@ -356,11 +381,11 @@ static void VXTick(void){
         if (g_projCount == 0 || !VXOk(g_cam)) VXGetCamera();
 
         if (g_step == 1) {
-            void *f = VXAt(g_facade, 0x8);
+            void *f = VXFacadeObj();
             g_match = f ? VXAt(f, 0x90) : NULL;
             if (!VXOk(g_match)) {
                 g_retry++;
-                if (g_retry % 300 == 0) VXLog(@"esperando match (%d) cam=%p proj=%d", g_retry, g_cam, g_projCount);
+                if (g_retry % 300 == 0) VXLog(@"esperando match (%d) f=%p cam=%p proj=%d", g_retry, f, g_cam, g_projCount);
                 return;
             }
             g_retry = 0;
@@ -536,18 +561,18 @@ static VXMenu *g_menu = nil;
 
     [g_panel addSubview:VXLabel(@"VEEX 1.132.1", CGRectMake(14, 10, 200, 20), 15)];
 
-    g_sw = [[UISwitch alloc] initWithFrame:CGRectMake(180, 8, 51, 31)];
+    g_sw = [[UISwitch alloc] initWithFrame:CGRectMake(200, 44, 51, 31)];
     [g_sw addTarget:g_menu action:@selector(espChanged:) forControlEvents:UIControlEventValueChanged];
     [g_panel addSubview:g_sw];
 
-    [g_panel addSubview:VXLabel(@"ESP", CGRectMake(14, 46, 100, 18), 13)];
-    [g_panel addSubview:VXBtn(@"COLOR", CGRectMake(120, 42, 110, 30), g_menu, @selector(colorTap))];
-    [g_panel addSubview:VXBtn(@"ESTADO", CGRectMake(14, 86, 100, 32), g_menu, @selector(estadoTap))];
-    [g_panel addSubview:VXBtn(@"RESET GUEST", CGRectMake(120, 86, 110, 32), g_menu, @selector(resetTap))];
-    [g_panel addSubview:VXBtn(@"CERRAR", CGRectMake(14, 130, 100, 32), g_menu, @selector(togglePanel))];
+    [g_panel addSubview:VXLabel(@"ESP", CGRectMake(14, 48, 100, 18), 13)];
+    [g_panel addSubview:VXBtn(@"COLOR", CGRectMake(14, 86, 110, 30), g_menu, @selector(colorTap))];
+    [g_panel addSubview:VXBtn(@"ESTADO", CGRectMake(14, 124, 100, 32), g_menu, @selector(estadoTap))];
+    [g_panel addSubview:VXBtn(@"RESET GUEST", CGRectMake(120, 124, 110, 32), g_menu, @selector(resetTap))];
+    [g_panel addSubview:VXBtn(@"CERRAR", CGRectMake(14, 168, 100, 32), g_menu, @selector(togglePanel))];
 
-    UILabel *foot = VXLabel(@"log: Documents/veex_log.txt", CGRectMake(14, 175, 220, 16), 10);
-    foot.textColor = [UIColor colorWithWhite:1 alpha:0.5];
+    UILabel *foot = VXLabel(@"log: Documents/veex_log.txt", CGRectMake(14, 210, 220, 16), 10);
+    foot.textColor = [UIColor colorWithWhite:0.6 alpha:0.6];
     [g_panel addSubview:foot];
 }
 
