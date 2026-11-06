@@ -169,16 +169,14 @@ static BOOL VXGetCamera(void){
 }
 
 static void VXPrepLocal(void){
-    if (g_m_getTransform && g_m_getPosition) return;
-
-    void *k = g_facade;
+    if (g_m_getTransform) return;
+    void *lk = g_local ? VXAt(g_local, 0) : NULL;
+    if (!VXOk(lk)) return;
+    void *k = lk;
     for (int i = 0; i < 12 && k; i++) {
         if (!g_m_getTransform) g_m_getTransform = p_class_get_method_from_name(k, "get_transform", 0);
+        if (g_m_getTransform) break;
         k = p_class_get_parent ? p_class_get_parent(k) : NULL;
-    }
-    if (g_local) {
-        void *lk = VXAt(g_local, 0);
-        if (VXOk(lk)) g_m_getPosition = p_class_get_method_from_name(lk, "get_position", 0);
     }
 }
 
@@ -188,7 +186,7 @@ static void VXSweep(void *match){
     void *mk = VXAt(match, 0);
     VXLog(@"--- SWEEP match=%p clase=%s ---", match,
           (mk && p_class_get_name) ? p_class_get_name(mk) : "?");
-    for (size_t off = 0x80; off <= 0x600; off += 8) {
+    for (size_t off = 0x80; off <= 0x900; off += 8) {
         void *p = VXAt(match, off);
         if (!VXOk(p)) continue;
         size_t s = 0;
@@ -397,16 +395,17 @@ static void VXTick(void){
         if (g_step == 2) {
             g_step = 3;
             g_local = VXAt(g_match, 0xD8);
-            VXLog(@"paso 3 local=%p cam=%p proj=%d", g_local, g_cam, g_projCount);
+            void *lk2 = g_local ? VXAt(g_local, 0) : NULL;
+            VXLog(@"paso 3 local=%p clase=%s", g_local, (lk2 && p_class_get_name) ? p_class_get_name(lk2) : "?");
             VXPrepLocal();
-            VXLog(@"paso 3 tf=%p pos=%p", g_m_getTransform, g_m_getPosition);
+            VXLog(@"paso 3 tf=%p", g_m_getTransform);
         }
 
         if (g_step == 3) {
             g_retry++;
             if (g_retry % 45 != 0) return;
             void *best = NULL; size_t bestOff = 0, bestSz = 0;
-            for (size_t off = 0x80; off <= 0x600; off += 8) {
+            for (size_t off = 0x80; off <= 0x900; off += 8) {
                 void *l = VXAt(g_match, off);
                 if (!VXOk(l)) continue;
                 void *it = VXAt(l, 0x10);
@@ -451,6 +450,20 @@ static void VXTick(void){
             void *tf = NULL;
             @try { tf = p_runtime_invoke(g_m_getTransform, pl, args, &exc); } @catch (...) { tf = NULL; }
             if (!VXOk(tf)) { g_D++; continue; }
+
+            if (!g_m_getPosition) {
+                void *tk = VXAt(tf, 0);
+                if (VXOk(tk)) {
+                    void *k2 = tk;
+                    for (int j = 0; j < 8 && k2; j++) {
+                        g_m_getPosition = p_class_get_method_from_name(k2, "get_position", 0);
+                        if (g_m_getPosition) break;
+                        k2 = p_class_get_parent ? p_class_get_parent(k2) : NULL;
+                    }
+                    VXLog(@"pos resuelto=%p", g_m_getPosition);
+                }
+            }
+            if (!g_m_getPosition) { g_D++; continue; }
 
             float *pos = NULL;
             void *exc2 = NULL;
