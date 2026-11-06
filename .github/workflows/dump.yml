@@ -5,7 +5,7 @@ on:
 
 jobs:
   dump:
-    runs-on: macos-15
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -26,13 +26,17 @@ jobs:
           APP=$(ls -d w/app/Payload/*.app | head -1)
           echo "APP=$APP" >> $GITHUB_ENV
           ls -la "$APP/Frameworks/UnityFramework.framework/" | head -5
+          ls -la "$APP/Data/Managed/Metadata/" | head -5
 
       - name: Dumper
         run: |
-          set -euo pipefail
-          git clone --depth 1 https://github.com/tien0246/Il2CppDumper-Free-Fire.git d
+          git clone --depth 1 https://github.com/tien0246/Il2CppDumper-Free-Fire.git d || echo "CLONE FALLO"
           cd d
-          dotnet build -c Release
+          ls -la
+          dotnet build -c Release 2>&1 | tail -30 || echo "BUILD FALLO"
+          echo "--- dlls encontradas ---"
+          find . -name "*.dll" -path "*bin*" | head -20
+          find . -iname "*il2cpp*" | head -20
 
       - name: Config
         run: |
@@ -51,25 +55,41 @@ jobs:
             "ForceDump": false
           }
           EOF
+          echo "config escrito"
 
       - name: Run
         run: |
-          EXE=$(find d -name Il2CppDumper.dll | head -1)
+          EXE=$(find d -name "Il2CppDumper.dll" | head -1)
+          echo "EXE=[$EXE]"
           UF="$APP/Frameworks/UnityFramework.framework/UnityFramework"
           META="$APP/Data/Managed/Metadata/global-metadata.dat"
+          echo "UF=[$UF]"
+          echo "META=[$META]"
           ls -la "$UF" "$META"
           mkdir -p out
-          dotnet "$EXE" "$UF" "$META" out || echo "dumper con error"
-          ls -la out | head
+          if [ -n "$EXE" ]; then
+            dotnet "$EXE" "$UF" "$META" out 2>&1 | tail -40 || echo "DUMPER ERROR"
+          else
+            echo "NO HAY DLL DEL DUMPER"
+          fi
+          echo "--- salida ---"
+          ls -la out || true
+          find . -maxdepth 3 -name "dump.cs" | head
 
       - name: Extracto
         run: |
           python3 - <<'PY'
-          import re
-          try:
-              s = open('out/dump.cs', encoding='utf-8', errors='ignore').read()
-          except Exception as e:
-              print("SIN DUMP", e); raise SystemExit
+          import os, glob
+          p = 'out/dump.cs'
+          if not os.path.exists(p):
+              print("SIN dump.cs")
+              for f in glob.glob('**/dump.cs', recursive=True):
+                  print("encontrado en:", f)
+                  p = f
+                  break
+          if not os.path.exists(p):
+              print("nada que extraer"); raise SystemExit
+          s = open(p, encoding='utf-8', errors='ignore').read()
           lines = s.splitlines()
           print("LINEAS TOTAL", len(lines))
           res = []
