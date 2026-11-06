@@ -1,0 +1,82 @@
+name: Dump
+
+on:
+  workflow_dispatch:
+
+jobs:
+  dump:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '6.0.x'
+
+      - name: Base
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p w
+          gh release download base --repo "$GITHUB_REPOSITORY" --pattern "com.dts.freefireth*.ipa" --dir w --clobber
+          f=$(ls w/com.dts.freefireth*.ipa | head -1)
+          mv "$f" w/base.ipa
+          unzip -q w/base.ipa -d w/app
+          APP=$(ls -d w/app/Payload/*.app | head -1)
+          echo "APP=$APP" >> $GITHUB_ENV
+          ls -la "$APP/Frameworks/UnityFramework.framework/" | head -5
+
+      - name: Dumper
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/tien0246/Il2CppDumper-Free-Fire.git d
+          cd d
+          dotnet build -c Release
+
+      - name: Config
+        run: |
+          cat > d/config.json <<'EOF'
+          {
+            "DumpMethod": false,
+            "DumpField": true,
+            "DumpProperty": false,
+            "DumpAttribute": false,
+            "DumpFieldOffset": true,
+            "DumpMethodOffset": false,
+            "DumpTypeDefIndex": true,
+            "GenerateDummyDll": false,
+            "GenerateStruct": false,
+            "RequireAnyKey": false,
+            "ForceDump": false
+          }
+          EOF
+
+      - name: Run
+        run: |
+          EXE=$(find d -name Il2CppDumper.dll | head -1)
+          UF="$APP/Frameworks/UnityFramework.framework/UnityFramework"
+          META="$APP/Data/Managed/Metadata/global-metadata.dat"
+          ls -la "$UF" "$META"
+          mkdir -p out
+          dotnet "$EXE" "$UF" "$META" out || echo "dumper con error"
+          ls -la out | head
+
+      - name: Extracto
+        run: |
+          python3 - <<'PY'
+          import re
+          try:
+              s = open('out/dump.cs', encoding='utf-8', errors='ignore').read()
+          except Exception as e:
+              print("SIN DUMP", e); raise SystemExit
+          lines = s.splitlines()
+          print("LINEAS TOTAL", len(lines))
+          res = []
+          for kw in ["class Player", "class GameFacade", "class MatchGame", "JMAGGLCNGIG"]:
+              hits = [i for i, l in enumerate(lines) if kw in l]
+              res.append("\n=== %s (%d) ===" % (kw, len(hits)))
+              for i in hits[:2]:
+                  res.append("\n".join(lines[i:i+90]))
+          print("\n".join(res)[:70000])
+          PY
