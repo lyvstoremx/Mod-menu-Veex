@@ -10,13 +10,11 @@
 #import <string.h>
 #import <unistd.h>
 #import <stdlib.h>
+#import <math.h>
 
 #pragma mark - tipos
 
 typedef struct { float x, y, z; } V3;
-typedef struct { float x, y, z, w; } V4;
-typedef struct { float x, y, z; } Q3;
-typedef struct { float x, y, z, w; } Q4;
 
 typedef enum {
     VXEspBox = 1,
@@ -31,17 +29,10 @@ typedef struct {
     BOOL esp;
     BOOL aim;
     BOOL diag;
-    BOOL silent;
-    BOOL rage;
     BOOL fovCircle;
     BOOL crosshair;
-    BOOL visibleOnly;
     NSInteger espBits;
-    float fov;
-    float smooth;
     float aimFov;
-    CGFloat boxW;
-    CGFloat boxH;
     UIColor *color;
     UIColor *bg;
     UIColor *line;
@@ -52,7 +43,6 @@ typedef struct {
 static VXConf g;
 static BOOL g_built;
 static BOOL g_ready;
-static BOOL g_hidOnce;
 static NSUInteger g_frames;
 static void *g_handle;
 static UIView *g_win;
@@ -64,16 +54,17 @@ static UILabel *g_fps;
 static CADisplayLink *g_link;
 static UIColor *g_accent;
 static NSInteger g_entities;
-static NSInteger g_targets;
-static void *g_target;
-static size_t g_trOff;
-static void *g_dictField;
-static void *g_dictCls;
 static void *g_camCls;
 static void *g_camMain;
 static void *g_w2s;
 static char g_dbg[200];
 static CFTimeInterval g_last;
+
+static void *g_facadeCls;
+static void *g_matchM;
+static void *g_localM;
+static void *g_playersM;
+static size_t g_neck, g_armL, g_armR, g_handL, g_handR, g_footL, g_footR;
 
 #pragma mark - api
 
@@ -86,21 +77,18 @@ static void *(*p_class_get_method_from_name)(void *, const char *, int);
 static void *(*p_runtime_invoke)(void *, void *, void **, void **);
 static void (*p_field_static_get_value)(void *, void *);
 static void *(*p_class_get_fields)(void *, void **);
+static void *(*p_class_get_methods)(void *, void **);
 static void *(*p_field_get_type)(void *);
 static char *(*p_type_get_name)(void *);
 static char *(*p_class_get_name)(void *);
+static char *(*p_field_get_name)(void *);
 static void *(*p_object_get_class)(void *);
 static void *(*p_array_new)(void *, size_t);
 static size_t (*p_image_class_count)(void *);
 static void *(*p_image_get_class)(void *, size_t);
 static void *(*p_thread_attach)(void *);
 static size_t (*p_field_get_offset)(void *);
-static void *(*p_class_get_type)(void *);
-static void *(*p_object_new)(void *);
-static void (*p_free)(void *);
-static void *(*p_string_new)(const char *);
-static void *(*p_class_get_property_from_name)(void *, const char *);
-static void *(*p_property_get_get_method)(void *);
+static void *(*p_method_get_return_type)(void *);
 static uint32_t (*p_method_get_param_count)(void *);
 
 #pragma mark - utilidades
@@ -155,19 +143,16 @@ static BOOL VXResolve(void) {
     p_runtime_invoke = VXS("il2cpp_runtime_invoke");
     p_field_static_get_value = VXS("il2cpp_field_static_get_value");
     p_class_get_fields = VXS("il2cpp_class_get_fields");
+    p_class_get_methods = VXS("il2cpp_class_get_methods");
     p_field_get_type = VXS("il2cpp_field_get_type");
     p_type_get_name = VXS("il2cpp_type_get_name");
     p_class_get_name = VXS("il2cpp_class_get_name");
+    p_field_get_name = VXS("il2cpp_field_get_name");
     p_object_get_class = VXS("il2cpp_object_get_class");
     p_array_new = VXS("il2cpp_array_new");
     p_thread_attach = VXS("il2cpp_thread_attach");
     p_field_get_offset = VXS("il2cpp_field_get_offset");
-    p_class_get_type = VXS("il2cpp_class_get_type");
-    p_object_new = VXS("il2cpp_object_new");
-    p_free = VXS("il2cpp_free");
-    p_string_new = VXS("il2cpp_string_new");
-    p_class_get_property_from_name = VXS("il2cpp_class_get_property_from_name");
-    p_property_get_get_method = VXS("il2cpp_property_get_get_method");
+    p_method_get_return_type = VXS("il2cpp_method_get_return_type");
     p_method_get_param_count = VXS("il2cpp_method_get_param_count");
 
     p_image_class_count = VXS("il2cpp_image_class_count");
@@ -194,12 +179,6 @@ static void VXAttach(void) {
 static void *VXAsmAt(void **as, size_t i) {
     if (!as || !as[i]) return NULL;
     return p_assembly_get_image(as[i]);
-}
-
-static size_t VXImgCount(void *img) {
-    if (!img) return 0;
-    if (p_image_class_count) return p_image_class_count(img);
-    return 6000;
 }
 
 static void *VXImageNamed(const char *needle) {
@@ -256,88 +235,108 @@ static BOOL VXValidObj(void *o) {
     return n && n[0];
 }
 
-static const char *VXClsName(void *o) {
-    if (!VXValidObj(o)) return NULL;
-    return p_class_get_name ? p_class_get_name(VXClsOf(o)) : NULL;
+static void *VXInvoke0(void *m, void *self) {
+    if (!m) return NULL;
+    void *e = NULL;
+    void *r = p_runtime_invoke(m, self, NULL, &e);
+    if (!r || e || !VXPtr(r)) return NULL;
+    return r;
 }
 
-#pragma mark - diccionario de entidades
+#pragma mark - entidades
 
-static const char *kVXCand[] = {
-    "SpawnObjectCrossHairTrigger",
-    "SpawnManager",
-    "PlayerManager",
-    "EntityManager",
-    "GameFacade",
-    "GameManager",
-    "Player",
-    "Character",
-    "Avatar",
-    "AvatarManager",
-    "Entity",
-    "Match",
-    "MatchManager",
-    "GameScene",
-    "PlayerEntity",
-    "EntityFactory"
-};
-
-static BOOL VXDictOK(void *dict) {
-    if (!VXPtr(dict)) return NO;
-    char *e = *(char **)((char *)dict + 0x18);
-    int c = *(int *)((char *)dict + 0x20);
-    if (!VXPtr(e)) return NO;
-    if (c <= 0 || c > 512) return NO;
-    void *first = *(void **)(e + 8);
-    if (!VXValidObj(first)) return NO;
-    return YES;
+static void *VXFacade(void) {
+    if (!g_facadeCls) g_facadeCls = VXClass("COW", "GameFacade");
+    return g_facadeCls;
 }
 
-static void *VXFieldDict(void *cls) {
+static void *VXMatch(void) {
+    void *f = VXFacade();
+    if (!f) return NULL;
+    if (!g_matchM) g_matchM = VXMethod(f, "CurrentMatch", 0);
+    return VXInvoke0(g_matchM, NULL);
+}
+
+static void *VXLocal(void) {
+    void *f = VXFacade();
+    if (!f) return NULL;
+    if (!g_localM) g_localM = VXMethod(f, "CurrentLocalPlayer", 0);
+    return VXInvoke0(g_localM, NULL);
+}
+
+static void *VXPlayersMethod(void *match) {
+    if (!match) return NULL;
+    if (g_playersM) return g_playersM;
+    void *cls = VXClsOf(match);
     if (!cls) return NULL;
+    void *it = NULL;
+    void *m = NULL;
+    while ((m = p_class_get_methods(cls, &it))) {
+        if (p_method_get_param_count && p_method_get_param_count(m) != 0) continue;
+        char *tn = (p_method_get_return_type && p_type_get_name)
+                   ? p_type_get_name(p_method_get_return_type(m)) : NULL;
+        if (!tn) continue;
+        if (!strstr(tn, "Player")) continue;
+        if (!strstr(tn, "List")) continue;
+        g_playersM = m;
+        return m;
+    }
+    return NULL;
+}
+
+static void *VXPlayers(void *match) {
+    void *m = VXPlayersMethod(match);
+    if (!m) return NULL;
+    void *e = NULL;
+    void *r = p_runtime_invoke(m, match, NULL, &e);
+    if (!r || e || !VXPtr(r)) return NULL;
+    return r;
+}
+
+static int VXCount(void *list) {
+    if (!list) return 0;
+    void *m = VXMethod(VXClsOf(list), "get_Count", 0);
+    void *r = VXInvoke0(m, list);
+    if (!r) return 0;
+    int32_t v = 0;
+    memcpy(&v, (char *)r + 16, 4);
+    return (v > 0 && v < 128) ? v : 0;
+}
+
+static void *VXItem(void *list, int i) {
+    if (!list) return NULL;
+    void *m = VXMethod(VXClsOf(list), "get_Item", 1);
+    if (!m) return NULL;
+    int32_t a = i;
+    void *args[1] = { &a };
+    void *e = NULL;
+    void *r = p_runtime_invoke(m, list, args, &e);
+    if (!r || e || !VXPtr(r)) return NULL;
+    return r;
+}
+
+static void VXBoneOffsets(void) {
+    if (g_neck) return;
+    void *cls = VXClass("COW.GamePlay", "Player");
+    if (!cls || !p_field_get_name || !p_field_get_offset) return;
+    const char *n[] = { "NeckBone", "ArmBoneLeft", "ArmBoneRight",
+                        "HandBoneLeft", "HandBoneRight", "FootBoneLeft", "FootBoneRight" };
+    size_t *dst[] = { &g_neck, &g_armL, &g_armR, &g_handL, &g_handR, &g_footL, &g_footR };
     void *it = NULL;
     void *fd = NULL;
     while ((fd = p_class_get_fields(cls, &it))) {
-        if (p_type_get_name && p_field_get_type) {
-            char *tn = p_type_get_name(p_field_get_type(fd));
-            if (!tn || !strstr(tn, "Dictionary")) continue;
-        }
-        void *d = NULL;
-        p_field_static_get_value(fd, &d);
-        if (VXDictOK(d)) {
-            g_dictCls = cls;
-            g_dictField = fd;
-            return d;
+        char *nm = p_field_get_name(fd);
+        if (!nm) continue;
+        for (int k = 0; k < 7; k++) {
+            if (strcmp(nm, n[k]) == 0) *dst[k] = p_field_get_offset(fd);
         }
     }
-    return NULL;
 }
 
-static void *VXFindDict(void) {
-    if (g_dictField) {
-        void *d = NULL;
-        p_field_static_get_value(g_dictField, &d);
-        if (VXDictOK(d)) return d;
-        g_dictField = NULL;
-    }
-    if (!VXResolve()) return NULL;
-    void *dom = p_domain_get();
-    if (!dom) return NULL;
-    size_t n = 0;
-    void **as = p_domain_get_assemblies(dom, &n);
-    if (!as) return NULL;
-
-    for (size_t t = 0; t < sizeof(kVXCand) / sizeof(*kVXCand); t++) {
-        for (size_t i = 0; i < n; i++) {
-            void *img = VXAsmAt(as, i);
-            if (!img) continue;
-            void *cls = p_class_from_name(img, "", kVXCand[t]);
-            if (!cls) continue;
-            void *d = VXFieldDict(cls);
-            if (d) return d;
-        }
-    }
-    return NULL;
+static void *VXBone(void *player, size_t off) {
+    if (!off || !VXValidObj(player)) return NULL;
+    void *t = *(void **)((char *)player + off);
+    return VXPtr(t) ? t : NULL;
 }
 
 #pragma mark - camara y transform
@@ -349,49 +348,28 @@ static void *VXCam(void) {
     if (!g_camMain) return NULL;
     void *e = NULL;
     void *cam = p_runtime_invoke(g_camMain, NULL, NULL, &e);
-    if (!cam || e) return NULL;
+    if (!cam || e || !VXPtr(cam)) return NULL;
     return cam;
 }
 
 static void *VXTransformOf(void *obj) {
     if (!VXValidObj(obj)) return NULL;
     void *m = VXMethod(VXClsOf(obj), "get_transform", 0);
-    if (!m) return NULL;
-    void *e = NULL;
-    void *r = p_runtime_invoke(m, obj, NULL, &e);
-    if (!r || e) return NULL;
-    return VXPtr(r) ? r : NULL;
+    return VXInvoke0(m, obj);
 }
 
 static BOOL VXPosOf(void *tr, V3 *out) {
     if (!VXValidObj(tr)) return NO;
     void *m = VXMethod(VXClsOf(tr), "get_position", 0);
-    if (!m) return NO;
-    void *e = NULL;
-    void *r = p_runtime_invoke(m, tr, NULL, &e);
-    if (!r || e) return NO;
+    void *r = VXInvoke0(m, tr);
+    if (!r) return NO;
     memcpy(out, (char *)r + 16, sizeof(V3));
     return YES;
 }
 
-static void *VXChild(void *tr, int idx) {
-    if (!VXValidObj(tr)) return NULL;
-    void *m = VXMethod(VXClsOf(tr), "GetChild", 1);
-    if (!m) return NULL;
-    int32_t a = idx;
-    void *args[1] = { &a };
-    void *e = NULL;
-    void *r = p_runtime_invoke(m, tr, args, &e);
-    if (!r || e) return NULL;
-    return VXPtr(r) ? r : NULL;
-}
-
 static BOOL VXToScreen(void *cam, V3 w, CGPoint *out) {
     if (!cam) return NO;
-    if (!g_w2s) {
-        void *c = VXClsOf(cam);
-        g_w2s = VXMethod(c, "WorldToScreenPoint", 1);
-    }
+    if (!g_w2s) g_w2s = VXMethod(VXClsOf(cam), "WorldToScreenPoint", 1);
     if (!g_w2s) return NO;
     void *args[1] = { &w };
     void *e = NULL;
@@ -410,124 +388,26 @@ static float VXDistTo(V3 a, V3 b) {
     return sqrtf(dx * dx + dy * dy + dz * dz);
 }
 
-#pragma mark - vida
-
-static BOOL VXHpOf(void *ent, float *out) {
-    if (!VXValidObj(ent)) return NO;
-    void *cls = VXClsOf(ent);
-    const char *names[] = { "get_Hp", "get_HP", "get_Health", "get_CurHp", "get_hp" };
-    for (int i = 0; i < 5; i++) {
-        void *m = VXMethod(cls, names[i], 0);
-        if (!m) continue;
-        void *e = NULL;
-        void *r = p_runtime_invoke(m, ent, NULL, &e);
-        if (!r || e) continue;
-        float v = 0;
-        memcpy(&v, (char *)r + 16, 4);
-        if (v > 0 && v < 100000) {
-            *out = v;
-            return YES;
-        }
-    }
-    return NO;
-}
-
-#pragma mark - carga del parche
-
-static BOOL VXPatchLoad(void) {
-    NSString *src = [[[NSBundle mainBundle] bundlePath] stringByAppendingPathComponent:@"veexpatch.bin"];
-    NSData *d = [NSData dataWithContentsOfFile:src];
-    if (!d || d.length < 64) return NO;
-
-    void *img = VXImageNamed("IFix.Core");
-    if (!img) return NO;
-    void *cls = p_class_from_name(img, "IFix.Core", "PatchManager");
-    if (!cls) return NO;
-
-    void *ms = VXImageNamed("mscorlib");
-    if (!ms) return NO;
-    void *byteCls = p_class_from_name(ms, "System", "Byte");
-    if (!byteCls || !p_array_new) return NO;
-
-    void *arr = p_array_new(byteCls, d.length);
-    if (!arr) return NO;
-    memcpy((char *)arr + 0x20, d.bytes, d.length);
-
-    void *m = VXMethod(cls, "Load", 1);
-    void *exc = NULL;
-    if (m) {
-        void *args[1] = { arr };
-        p_runtime_invoke(m, NULL, args, &exc);
-        return exc == NULL;
-    }
-    m = VXMethod(cls, "Load", 0);
-    if (!m) return NO;
-    p_runtime_invoke(m, NULL, NULL, &exc);
-    return exc == NULL;
-}
-
-#pragma mark - reset invitado
-
-static void VXResetGuest(void) {
-    NSFileManager *fm = [NSFileManager defaultManager];
-    NSString *home = NSHomeDirectory();
-    NSArray *paths = @[
-        @"Documents/il2cpp",
-        @"Library/Preferences/com.dts.freefireth.plist",
-        @"Library/Caches/com.dts.freefireth",
-        @"Documents/Unity",
-        @"Library/Application Support/com.dts.freefireth"
-    ];
-    for (NSString *p in paths) {
-        [fm removeItemAtPath:[home stringByAppendingPathComponent:p] error:nil];
-    }
-    NSUserDefaults *ud = [NSUserDefaults standardUserDefaults];
-    for (NSString *k in [ud dictionaryRepresentation].allKeys) {
-        if ([k.lowercaseString containsString:@"guest"] ||
-            [k.lowercaseString containsString:@"uid"] ||
-            [k.lowercaseString containsString:@"login"]) {
-            [ud removeObjectForKey:k];
-        }
-    }
-    [ud synchronize];
-}
-
 #pragma mark - dump
 
 static NSString *VXReport(void) {
     NSMutableString *s = [NSMutableString string];
-    [s appendString:@"VEEX DUMP\n"];
-
-    void *img = VXImageNamed("Assembly-CSharp");
-    if (!img) return @"sin assembly";
-    const char *in = p_image_get_name ? p_image_get_name(img) : "?";
-    [s appendFormat:@"IMG %s\n", in ?: "?"];
-
-    size_t cc = VXImgCount(img);
-    [s appendFormat:@"clases %zu\n", cc];
-
-    for (size_t k = 0; k < cc; k++) {
-        void *cls = p_image_get_class ? p_image_get_class(img, k) : NULL;
-        if (!cls) break;
-        char *cn = p_class_get_name(cls);
-        if (!cn) continue;
-        BOOL hit = NO;
-        const char *keys[] = { "Spawn", "Player", "Entity", "Manager", "Avatar", "Match", "Game" };
-        for (int i = 0; i < 7; i++) {
-            if (strstr(cn, keys[i])) { hit = YES; break; }
-        }
-        if (!hit) continue;
-        [s appendFormat:@"CLS %s\n", cn];
-        void *it = NULL;
-        void *fd = NULL;
-        while ((fd = p_class_get_fields(cls, &it))) {
-            char *tn = (p_type_get_name && p_field_get_type) ? p_type_get_name(p_field_get_type(fd)) : NULL;
-            size_t off = p_field_get_offset ? p_field_get_offset(fd) : 0;
-            [s appendFormat:@"  F +0x%zx %s\n", off, tn ?: "?"];
-            if (tn && strstr(tn, "Dictionary")) {
-                void *d = NULL;
-                p_field_static_get_value(fd, &d);
-                [s appendFormat:@"    -> %p ok %d\n", d, VXDictOK(d)];
+    [s appendString:@"VEEX\n"];
+    void *facade = VXFacade();
+    [s appendFormat:@"facade %p\n", facade];
+    void *m = VXMatch();
+    [s appendFormat:@"match %p\n", m];
+    if (m) {
+        void *pm = VXPlayersMethod(m);
+        [s appendFormat:@"listaMetodo %p\n", pm];
+        void *pl = VXPlayers(m);
+        [s appendFormat:@"lista %p n=%d\n", pl, VXCount(pl)];
+        if (pl) {
+            void *p = VXItem(pl, 0);
+            [s appendFormat:@"item0 %p\n", p];
+            if (p) {
+                char *cn = p_class_get_name ? p_class_get_name(VXClsOf(p)) : NULL;
+                [s appendFormat:@"item0Cls %s\n", cn ?: "?"];
             }
         }
     }
@@ -536,104 +416,55 @@ static NSString *VXReport(void) {
 
 static void VXShow(NSString *t) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (g_status) g_status.text = t.length > 160 ? [t substringToIndex:160] : t;
+        if (g_status) g_status.text = t.length > 200 ? [t substringToIndex:200] : t;
     });
-}
-
-static void VXUpload(NSString *txt) {
-    NSString *path = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/veexdump.txt"];
-    [txt writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
-
-    NSData *d = [txt dataUsingEncoding:NSUTF8StringEncoding];
-
-    NSMutableURLRequest *r = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://paste.rs/"]];
-    r.HTTPMethod = @"POST";
-    r.HTTPBody = d;
-    r.timeoutInterval = 25;
-    r.cachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
-
-    [[[NSURLSession sharedSession] dataTaskWithRequest:r completionHandler:^(NSData *rd, NSURLResponse *rp, NSError *er) {
-        if (!er && rd.length && rd.length < 200) {
-            NSString *u = [[NSString alloc] initWithData:rd encoding:NSUTF8StringEncoding];
-            VXShow([@"paste.rs/" stringByAppendingString:[u stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]]);
-            return;
-        }
-        NSString *b = @"----VXB";
-        NSString *hd = [NSString stringWithFormat:@"--%@\r\nContent-Disposition: form-data; name=\"file\"; filename=\"veexdump.txt\"\r\n\r\n", b];
-        NSMutableData *body = [NSMutableData data];
-        [body appendData:[hd dataUsingEncoding:NSUTF8StringEncoding]];
-        [body appendData:d];
-        [body appendData:[[NSString stringWithFormat:@"\r\n--%@--\r\n", b] dataUsingEncoding:NSUTF8StringEncoding]];
-
-        NSMutableURLRequest *r2 = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://0x0.st"]];
-        r2.HTTPMethod = @"POST";
-        r2.HTTPBody = body;
-        r2.timeoutInterval = 25;
-        [r2 setValue:[NSString stringWithFormat:@"multipart/form-data; boundary=%@", b] forHTTPHeaderField:@"Content-Type"];
-
-        [[[NSURLSession sharedSession] dataTaskWithRequest:r2 completionHandler:^(NSData *rd2, NSURLResponse *rp2, NSError *er2) {
-            if (!er2 && rd2.length && rd2.length < 200) {
-                VXShow([[NSString alloc] initWithData:rd2 encoding:NSUTF8StringEncoding]);
-            } else {
-                VXShow(@"dump local en Documents");
-            }
-        }] resume];
-    }] resume];
 }
 
 #pragma mark - aim
 
 static void VXAimStep(void) {
     if (!g.aim || !g_ready) return;
-    if (g_targets <= 0) return;
-
     void *cam = VXCam();
     if (!cam) return;
+    void *match = VXMatch();
+    if (!match) return;
+    void *list = VXPlayers(match);
+    int cnt = VXCount(list);
+    if (cnt <= 0) return;
+    void *local = VXLocal();
 
     CGPoint mid = CGPointMake(VXW() / 2, VXH() / 2);
     float best = g.aimFov > 0 ? g.aimFov : 400;
     void *pick = NULL;
 
-    void *dict = VXFindDict();
-    if (!dict) return;
-    char *e = *(char **)((char *)dict + 0x18);
-    int cnt = *(int *)((char *)dict + 0x20);
-
     for (int i = 0; i < cnt; i++) {
-        void *ent = *(void **)(e + i * 24 + 8);
-        if (!VXValidObj(ent)) continue;
-        void *tr = VXTransformOf(ent);
+        void *p = VXItem(list, i);
+        if (!p || p == local) continue;
+        void *tr = VXTransformOf(p);
         if (!tr) continue;
         V3 w;
         if (!VXPosOf(tr, &w)) continue;
-        CGPoint p;
-        if (!VXToScreen(cam, w, &p)) continue;
-        float dx = p.x - mid.x;
-        float dy = p.y - mid.y;
+        CGPoint sp;
+        if (!VXToScreen(cam, w, &sp)) continue;
+        float dx = sp.x - mid.x;
+        float dy = sp.y - mid.y;
         float d = sqrtf(dx * dx + dy * dy);
         if (d < best) {
             best = d;
-            pick = ent;
+            pick = p;
         }
     }
+    if (!pick) return;
 
-    if (!pick) {
-        g_target = NULL;
-        return;
-    }
-    g_target = pick;
-
-    void *ptr = VXTransformOf(pick);
-    if (!ptr) return;
-
+    void *hm = VXMethod(VXClsOf(pick), "GetHeadTF", 0);
+    void *head = VXInvoke0(hm, pick);
+    void *root = VXTransformOf(pick);
+    if (!root || !head) return;
     void *mLook = VXMethod(VXClass("UnityEngine", "Transform"), "LookAt", 1);
     if (!mLook) return;
-    void *t = VXTransformOf(ptr);
-    if (!t) return;
-
-    void *args[1] = { &g_target };
+    void *args[1] = { &head };
     void *exc = NULL;
-    p_runtime_invoke(mLook, ptr, args, &exc);
+    p_runtime_invoke(mLook, root, args, &exc);
 }
 
 #pragma mark - overlay
@@ -678,122 +509,145 @@ static void VXAimStep(void) {
         g_status.text = @"cam null";
         return;
     }
-
-    void *dict = VXFindDict();
-    if (!dict) {
-        g_status.text = @"sin dict";
+    void *match = VXMatch();
+    if (!match) {
+        g_status.text = @"sin match";
+        return;
+    }
+    void *players = VXPlayers(match);
+    if (!players) {
+        g_status.text = @"sin lista";
+        return;
+    }
+    int cnt = VXCount(players);
+    if (cnt <= 0) {
+        g_status.text = @"lista vacia";
         return;
     }
 
-    char *e = *(char **)((char *)dict + 0x18);
-    int cnt = *(int *)((char *)dict + 0x20);
-    if (!VXPtr(e) || cnt <= 0) {
-        g_status.text = [NSString stringWithFormat:@"r mal n=%d", cnt];
-        return;
-    }
+    void *local = VXLocal();
+    void *localTr = local ? VXTransformOf(local) : NULL;
+    V3 localPos;
+    BOOL hasLocal = localTr ? VXPosOf(localTr, &localPos) : NO;
 
-    V3 camPos;
-    void *camTr = VXTransformOf(cam);
-    BOOL hasCam = camTr ? VXPosOf(camTr, &camPos) : NO;
+    VXBoneOffsets();
 
     NSInteger drawn = 0;
-    CGContextSetLineWidth(c, 1.1);
+    CGContextSetLineWidth(c, 1.2);
     CGContextSetStrokeColorWithColor(c, g.color.CGColor);
 
     for (int i = 0; i < cnt; i++) {
-        void *ent = *(void **)(e + i * 24 + 8);
-        if (!VXValidObj(ent)) ent = *(void **)(e + i * 16 + 8);
-        if (!VXValidObj(ent)) continue;
+        void *p = VXItem(players, i);
+        if (!p || p == local) continue;
 
-        void *tr = VXTransformOf(ent);
+        void *vm = VXMethod(VXClsOf(p), "IsVisible", 0);
+        if (vm) {
+            void *r = VXInvoke0(vm, p);
+            if (r) {
+                uint8_t v = 0;
+                memcpy(&v, (char *)r + 16, 1);
+                if (!v) continue;
+            }
+        }
+
+        void *tr = VXTransformOf(p);
         if (!tr) continue;
-        V3 w;
-        if (!VXPosOf(tr, &w)) continue;
-        CGPoint p;
-        if (!VXToScreen(cam, w, &p)) continue;
-        if (p.x < -80 || p.x > VXW() + 80) continue;
-        if (p.y < -80 || p.y > VXH() + 80) continue;
+        V3 hip;
+        if (!VXPosOf(tr, &hip)) continue;
+        float dist = hasLocal ? VXDistTo(localPos, hip) : 0;
+        if (hasLocal && dist > 150) continue;
 
-        float dist = hasCam ? VXDistTo(camPos, w) : 0;
-        CGFloat h = 2400.0 / (dist > 1 ? dist : 1);
-        if (h < 14) h = 14;
-        if (h > 260) h = 260;
-        CGFloat bw = h * 0.42;
-        if (g.boxW > 0) bw = g.boxW;
-        if (g.boxH > 0) h = g.boxH;
-        CGRect box = CGRectMake(p.x - bw / 2, p.y - h, bw, h);
+        void *hm = VXMethod(VXClsOf(p), "GetHeadTF", 0);
+        void *head = VXInvoke0(hm, p);
+        if (!head) continue;
+
+        V3 feetW = { hip.x, hip.y - 0.85f, hip.z };
+        V3 headW = { hip.x, hip.y + 0.95f, hip.z };
+        CGPoint fs, hs;
+        if (!VXToScreen(cam, feetW, &fs)) continue;
+        if (!VXToScreen(cam, headW, &hs)) continue;
+
+        CGFloat rawH = fabs(hs.y - fs.y);
+        if (rawH < 2) continue;
+        CGFloat h = rawH * 0.85f;
+        CGFloat bw = rawH * 0.5f;
+        CGRect box = CGRectMake(hs.x - bw / 2, hs.y - rawH * 0.15f, bw, h);
 
         if (g.espBits & (1 << VXEspBox)) {
             CGContextStrokeRect(c, box);
             CGContextStrokeRect(c, CGRectInset(box, -1.5, -1.5));
         }
-
         if (g.espBits & (1 << VXEspLine)) {
             CGContextMoveToPoint(c, VXW() / 2, VXH() - 42);
-            CGContextAddLineToPoint(c, p.x, p.y);
+            CGContextAddLineToPoint(c, box.origin.x + bw / 2, box.origin.y + h);
             CGContextStrokePath(c);
         }
-
         if (g.espBits & (1 << VXEspBone)) {
-            CGPoint pts[24];
-            BOOL ok[24];
-            for (int b = 0; b < 24; b++) {
-                ok[b] = NO;
-                void *ct = VXChild(tr, b);
-                if (!ct) continue;
-                V3 bw2;
-                if (!VXPosOf(ct, &bw2)) continue;
-                ok[b] = VXToScreen(cam, bw2, &pts[b]);
-            }
-            const int pair[][2] = {
-                {0,1},{1,2},{2,3},{3,4},{2,5},{5,6},{6,7},{2,8},{8,9},{9,10},
-                {2,11},{11,12},{12,13},{11,14},{14,15},{15,16},{11,17},{17,18},{18,19}
-            };
-            for (int b = 0; b < (int)(sizeof(pair) / sizeof(*pair)); b++) {
-                int a1 = pair[b][0], a2 = pair[b][1];
-                if (a1 > 23 || a2 > 23) continue;
-                if (!ok[a1] || !ok[a2]) continue;
-                CGContextMoveToPoint(c, pts[a1].x, pts[a1].y);
-                CGContextAddLineToPoint(c, pts[a2].x, pts[a2].y);
+            CGPoint nk, aL, aR, hL, hR, fL, fR;
+            V3 w2;
+            void *bt = NULL;
+            BOOL okN = NO, okL = NO, okR = NO, okHL = NO, okHR = NO, okFL = NO, okFR = NO;
+            bt = VXBone(p, g_neck); okN = bt && VXPosOf(bt, &w2) && VXToScreen(cam, w2, &nk);
+            bt = VXBone(p, g_armL); okL = bt && VXPosOf(bt, &w2) && VXToScreen(cam, w2, &aL);
+            bt = VXBone(p, g_armR); okR = bt && VXPosOf(bt, &w2) && VXToScreen(cam, w2, &aR);
+            bt = VXBone(p, g_handL); okHL = bt && VXPosOf(bt, &w2) && VXToScreen(cam, w2, &hL);
+            bt = VXBone(p, g_handR); okHR = bt && VXPosOf(bt, &w2) && VXToScreen(cam, w2, &hR);
+            bt = VXBone(p, g_footL); okFL = bt && VXPosOf(bt, &w2) && VXToScreen(cam, w2, &fL);
+            bt = VXBone(p, g_footR); okFR = bt && VXPosOf(bt, &w2) && VXToScreen(cam, w2, &fR);
+
+            void (^seg)(CGPoint, BOOL, CGPoint, BOOL) = ^(CGPoint a, BOOL oka, CGPoint b, BOOL okb) {
+                if (!oka || !okb) return;
+                CGContextMoveToPoint(c, a.x, a.y);
+                CGContextAddLineToPoint(c, b.x, b.y);
                 CGContextStrokePath(c);
-            }
+            };
+            seg(hs, YES, nk, okN);
+            seg(nk, okN, aL, okL);
+            seg(nk, okN, aR, okR);
+            seg(aL, okL, hL, okHL);
+            seg(aR, okR, hR, okHR);
+            seg(nk, okN, fs, YES);
+            seg(fs, YES, fL, okFL);
+            seg(fs, YES, fR, okFR);
         }
-
         if (g.espBits & (1 << VXEspHp)) {
-            float hp = 0;
-            if (VXHpOf(ent, &hp) && hp > 0) {
-                CGFloat pct = hp / 200.0;
-                if (pct > 1) pct = 1;
-                CGContextSetFillColorWithColor(c, [[UIColor colorWithWhite:0.15 alpha:1] CGColor]);
-                CGContextFillRect(c, CGRectMake(box.origin.x - 5, box.origin.y, 3, h));
-                CGContextSetFillColorWithColor(c, [[UIColor greenColor] CGColor]);
-                CGContextFillRect(c, CGRectMake(box.origin.x - 5, box.origin.y + h * (1 - pct), 3, h * pct));
-                CGContextSetStrokeColorWithColor(c, g.color.CGColor);
+            void *hc = VXMethod(VXClsOf(p), "get_CurHP", 0);
+            void *mc = VXMethod(VXClsOf(p), "get_MaxHP", 0);
+            void *rh = VXInvoke0(hc, p);
+            void *rm = VXInvoke0(mc, p);
+            if (rh && rm) {
+                int32_t hpv = 0, mxv = 100;
+                memcpy(&hpv, (char *)rh + 16, 4);
+                memcpy(&mxv, (char *)rm + 16, 4);
+                if (mxv > 0) {
+                    CGFloat pct = (CGFloat)hpv / (CGFloat)mxv;
+                    if (pct < 0) pct = 0;
+                    if (pct > 1) pct = 1;
+                    CGContextSetFillColorWithColor(c, [[UIColor colorWithWhite:0.15 alpha:1] CGColor]);
+                    CGContextFillRect(c, CGRectMake(box.origin.x - 6, box.origin.y, 3, h));
+                    CGContextSetFillColorWithColor(c, [[UIColor greenColor] CGColor]);
+                    CGContextFillRect(c, CGRectMake(box.origin.x - 6, box.origin.y + h * (1 - pct), 3, h * pct));
+                    CGContextSetStrokeColorWithColor(c, g.color.CGColor);
+                }
             }
         }
-
         if (g.espBits & (1 << VXEspName)) {
-            const char *cn = VXClsName(ent);
-            NSString *nm = cn ? [NSString stringWithUTF8String:cn] : @"ent";
-            [nm drawAtPoint:CGPointMake(box.origin.x, box.origin.y - 13)
-             withAttributes:@{ NSFontAttributeName: [UIFont boldSystemFontOfSize:9],
-                               NSForegroundColorAttributeName: g.color }];
+            [@"enemigo" drawAtPoint:CGPointMake(box.origin.x, box.origin.y - 12)
+                     withAttributes:@{ NSFontAttributeName: [UIFont boldSystemFontOfSize:9],
+                                       NSForegroundColorAttributeName: g.color }];
         }
-
         if (g.espBits & (1 << VXEspDist)) {
             NSString *ds = [NSString stringWithFormat:@"%.0fm", dist];
             [ds drawAtPoint:CGPointMake(box.origin.x, box.origin.y + h + 2)
              withAttributes:@{ NSFontAttributeName: [UIFont boldSystemFontOfSize:9],
                                NSForegroundColorAttributeName: g.color }];
         }
-
         drawn++;
     }
 
     g_entities = drawn;
     if (g.diag) {
-        snprintf(g_dbg, sizeof(g_dbg), "cnt %d dib %ld cls %s",
-                 cnt, (long)drawn, g_dictCls && p_class_get_name ? p_class_get_name(g_dictCls) : "?");
+        snprintf(g_dbg, sizeof(g_dbg), "n %d dib %ld", cnt, (long)drawn);
         [[NSString stringWithUTF8String:g_dbg] drawAtPoint:CGPointMake(12, VXH() * 0.5)
             withAttributes:@{ NSFontAttributeName: [UIFont boldSystemFontOfSize:12],
                               NSForegroundColorAttributeName: [UIColor whiteColor] }];
@@ -812,7 +666,6 @@ static void VXAimStep(void) {
 - (void)onSlider:(UISlider *)s;
 - (void)onColor:(UIButton *)b;
 - (void)doDump;
-- (void)doReset;
 - (void)doBoot;
 - (void)paint:(UIButton *)b;
 @end
@@ -863,7 +716,6 @@ static void VXAimStep(void) {
         case 109: on = g.fovCircle; break;
         case 110: on = g.crosshair; break;
         case 111: on = g.diag; break;
-        case 112: on = g.silent; break;
         default: break;
     }
     b.backgroundColor = [UIColor colorWithWhite:0.10 alpha:1];
@@ -873,39 +725,25 @@ static void VXAimStep(void) {
 
 - (void)onChip:(UIButton *)b {
     switch (b.tag) {
-        case 101:
-            g.esp = !g.esp;
-            if (g.esp) [self doBoot];
-            break;
+        case 101: g.esp = !g.esp; if (g.esp) [self doBoot]; break;
         case 102: g.espBits ^= (1 << VXEspBox); break;
         case 103: g.espBits ^= (1 << VXEspBone); break;
         case 104: g.espBits ^= (1 << VXEspName); break;
         case 105: g.espBits ^= (1 << VXEspHp); break;
         case 106: g.espBits ^= (1 << VXEspDist); break;
         case 107: g.espBits ^= (1 << VXEspLine); break;
-        case 108:
-            g.aim = !g.aim;
-            if (g.aim) [self doBoot];
-            break;
+        case 108: g.aim = !g.aim; if (g.aim) [self doBoot]; break;
         case 109: g.fovCircle = !g.fovCircle; break;
         case 110: g.crosshair = !g.crosshair; break;
         case 111: g.diag = !g.diag; break;
-        case 112: g.silent = !g.silent; break;
-        case 113: [self doDump]; break;
-        case 114: [self doReset]; break;
-        case 115: g_panel.hidden = YES; break;
+        case 112: [self doDump]; break;
+        case 113: g_panel.hidden = YES; break;
     }
     [self paint:b];
 }
 
 - (void)onSlider:(UISlider *)s {
-    if (s.tag == 201) {
-        g.fov = s.value;
-        g.aimFov = s.value;
-    }
-    if (s.tag == 202) g.smooth = s.value;
-    if (s.tag == 203) g.boxW = s.value;
-    if (s.tag == 204) g.boxH = s.value;
+    if (s.tag == 201) g.aimFov = s.value;
 }
 
 - (void)onColor:(UIButton *)b {
@@ -921,14 +759,6 @@ static void VXAimStep(void) {
             VXShow(@"sin api");
             return;
         }
-        for (int i = 0; i < 60 && !g_ready; i++) {
-            if (VXFindDict()) break;
-            usleep(300000);
-        }
-        if (!g_ready) {
-            if (VXPatchLoad()) VXShow(@"parche cargado");
-            else VXShow(@"parche no");
-        }
         dispatch_async(dispatch_get_main_queue(), ^{ g_ready = YES; });
     });
 }
@@ -937,23 +767,11 @@ static void VXAimStep(void) {
     VXShow(@"dump...");
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
         VXAttach();
-        VXUpload(VXReport());
-    });
-}
-
-- (void)doReset {
-    VXShow(@"reset...");
-    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-        VXResetGuest();
-        usleep(600000);
-        VXShow(@"listo, cierra el juego");
+        VXShow(VXReport());
     });
 }
 
 - (void)tick {
-    if (!g_hidOnce) {
-        g_hidOnce = YES;
-    }
     g_frames++;
     if (g_draw) [g_draw setNeedsDisplay];
     if (g.aim) VXAimStep();
@@ -974,8 +792,6 @@ static void VXAimStep(void) {
     [p setTranslation:CGPointZero inView:self];
 }
 
-- (void)closePanel { g_panel.hidden = YES; }
-
 @end
 
 #pragma mark - construccion
@@ -988,12 +804,8 @@ static void VXBuildMenu(void) {
     g.color = [UIColor whiteColor];
     g.bg = [UIColor colorWithWhite:0.05 alpha:0.97];
     g.line = [UIColor colorWithWhite:0.28 alpha:1];
-    g.espBits = (1 << VXEspBox) | (1 << VXEspName) | (1 << VXEspDist);
-    g.fov = 160;
+    g.espBits = (1 << VXEspBox) | (1 << VXEspDist);
     g.aimFov = 160;
-    g.smooth = 0.35;
-    g.boxW = 0;
-    g.boxH = 0;
 
     UIWindow *w = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
     w.windowLevel = UIWindowLevelAlert + 1;
@@ -1025,8 +837,7 @@ static void VXBuildMenu(void) {
     [host addSubview:g_bubble];
 
     [g_bubble addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:host action:@selector(bubbleTapped)]];
-    UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:host action:@selector(drag:)];
-    [g_bubble addGestureRecognizer:pan];
+    [g_bubble addGestureRecognizer:[[UIPanGestureRecognizer alloc] initWithTarget:host action:@selector(drag:)]];
 
     CGFloat pw = 306, ph = VXH() - 180;
     g_panel = [[UIView alloc] initWithFrame:CGRectMake(0, 0, pw, ph)];
@@ -1066,13 +877,12 @@ static void VXBuildMenu(void) {
     [x setTitle:@"×" forState:UIControlStateNormal];
     [x setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
     x.titleLabel.font = [UIFont boldSystemFontOfSize:18];
-    x.tag = 115;
+    x.tag = 113;
     [x addTarget:host action:@selector(onChip:) forControlEvents:UIControlEventTouchUpInside];
     [head addSubview:x];
 
     UIScrollView *sv = [[UIScrollView alloc] initWithFrame:CGRectMake(0, 52, pw, ph - 52)];
     sv.showsVerticalScrollIndicator = NO;
-    sv.contentSize = CGSizeMake(pw, 760);
     [g_panel addSubview:sv];
 
     CGFloat y = 10;
@@ -1092,7 +902,7 @@ static void VXBuildMenu(void) {
     [sv addSubview:[host label:@"APUNTADO" size:10 color:[UIColor colorWithWhite:0.5 alpha:1] y:y]];
     y += 20;
     cx = 14;
-    NSArray *achips = @[@"AIM", @"FOV", @"MIRA", @"DIAG", @"SILENT"];
+    NSArray *achips = @[@"AIM", @"FOV", @"MIRA", @"DIAG"];
     for (NSInteger i = 0; i < achips.count; i++) {
         CGFloat wd = 72;
         if (cx + wd > pw - 14) { cx = 14; y += 36; }
@@ -1109,16 +919,6 @@ static void VXBuildMenu(void) {
     sf.tag = 201;
     [sf addTarget:host action:@selector(onSlider:) forControlEvents:UIControlEventValueChanged];
     [sv addSubview:sf];
-    y += 52;
-
-    [sv addSubview:[host label:@"SUAVIDAD" size:10 color:[UIColor colorWithWhite:0.5 alpha:1] y:y]];
-    UISlider *ss = [[UISlider alloc] initWithFrame:CGRectMake(14, y + 16, pw - 28, 26)];
-    ss.minimumValue = 0.02;
-    ss.maximumValue = 1;
-    ss.value = g.smooth;
-    ss.tag = 202;
-    [ss addTarget:host action:@selector(onSlider:) forControlEvents:UIControlEventValueChanged];
-    [sv addSubview:ss];
     y += 52;
 
     [sv addSubview:[host label:@"COLOR" size:10 color:[UIColor colorWithWhite:0.5 alpha:1] y:y]];
@@ -1139,17 +939,16 @@ static void VXBuildMenu(void) {
 
     [sv addSubview:[host label:@"SISTEMA" size:10 color:[UIColor colorWithWhite:0.5 alpha:1] y:y]];
     y += 20;
-    [sv addSubview:[host chip:@"DUMP" x:14 y:y w:100 tag:113]];
-    [sv addSubview:[host chip:@"RESET GUEST" x:122 y:y w:130 tag:114]];
+    [sv addSubview:[host chip:@"ESTADO" x:14 y:y w:100 tag:112]];
     y += 40;
 
-    g_status = [[UILabel alloc] initWithFrame:CGRectMake(14, y, pw - 28, 60)];
+    g_status = [[UILabel alloc] initWithFrame:CGRectMake(14, y, pw - 28, 80)];
     g_status.text = @"listo";
     g_status.numberOfLines = 0;
     g_status.textColor = [UIColor colorWithWhite:0.72 alpha:1];
     g_status.font = [UIFont fontWithName:@"Menlo" size:10] ?: [UIFont systemFontOfSize:10];
     [sv addSubview:g_status];
-    y += 66;
+    y += 86;
 
     sv.contentSize = CGSizeMake(pw, y + 20);
 
