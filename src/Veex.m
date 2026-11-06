@@ -29,7 +29,7 @@ typedef uint32_t (*fn_method_get_param_count)(void *);
 typedef void *(*fn_method_get_param)(void *, uint32_t);
 typedef char *(*fn_type_get_name)(void *);
 typedef void *(*fn_thread_attach)(void *);
-typedef uint32_t (*fn_image_class_count)(void *);
+typedef size_t (*fn_image_class_count)(void *);
 typedef void *(*fn_image_get_class)(void *, uint32_t);
 typedef const char *(*fn_class_get_name)(void *);
 typedef const char *(*fn_class_get_namespace)(void *);
@@ -103,6 +103,8 @@ static BOOL VXResolve(void) {
     p_type_get_name              = (fn_type_get_name)VXSym("il2cpp_type_get_name");
     p_thread_attach              = (fn_thread_attach)VXSym("il2cpp_thread_attach");
     p_image_class_count          = (fn_image_class_count)VXSym("il2cpp_image_class_count");
+    if (!p_image_class_count) p_image_class_count = (fn_image_class_count)VXSym("il2cpp_image_get_class_count");
+    if (!p_image_class_count) p_image_class_count = (fn_image_class_count)VXSym("il2cpp_image_get_type_count");
     p_image_get_class            = (fn_image_get_class)VXSym("il2cpp_image_get_class");
     p_class_get_name             = (fn_class_get_name)VXSym("il2cpp_class_get_name");
     p_class_get_namespace        = (fn_class_get_namespace)VXSym("il2cpp_class_get_namespace");
@@ -288,12 +290,11 @@ static void *VXFindDict(void) {
     if (g_lastScan && ahora - g_lastScan < 2.0) return NULL;
     g_lastScan = ahora;
 
-    if (!p_image_class_count || !p_image_get_class || !p_class_get_fields ||
+    if (!p_image_get_class || !p_class_get_fields ||
         !p_field_get_type || !p_type_get_name) {
-        g_dbg = [NSString stringWithFormat:@"falta api %d%d%d%d%d",
-                 p_image_class_count ? 1 : 0, p_image_get_class ? 1 : 0,
-                 p_class_get_fields ? 1 : 0, p_field_get_type ? 1 : 0,
-                 p_type_get_name ? 1 : 0];
+        g_dbg = [NSString stringWithFormat:@"falta api %d%d%d%d",
+                 p_image_get_class ? 1 : 0, p_class_get_fields ? 1 : 0,
+                 p_field_get_type ? 1 : 0, p_type_get_name ? 1 : 0];
         return NULL;
     }
 
@@ -308,10 +309,10 @@ static void *VXFindDict(void) {
         void *img = p_assembly_get_image(a);
         if (!img) continue;
 
-        size_t cc = p_image_class_count(img);
+        size_t cc = p_image_class_count ? p_image_class_count(img) : 40000;
         for (size_t k = 0; k < cc; k++) {
             void *cls = p_image_get_class(img, (uint32_t)k);
-            if (!cls) continue;
+            if (!cls) { if (p_image_class_count) continue; break; }
             const char *cn = p_class_get_name(cls);
             if (!cn) continue;
             if (!(strstr(cn, "Spawn") || strstr(cn, "Manager") ||
@@ -405,12 +406,12 @@ static void VXDump(void) {
     if (!d) { VXSay(@"dump: sin dominio"); return; }
     if (p_thread_attach) p_thread_attach(d);
 
-    if (!p_image_class_count || !p_image_get_class || !p_class_get_fields ||
+    if (!p_image_get_class || !p_class_get_fields ||
         !p_field_get_name || !p_field_get_type || !p_class_get_name) {
-        VXSay([NSString stringWithFormat:@"dump api %d%d%d%d%d%d",
-               p_image_class_count ? 1 : 0, p_image_get_class ? 1 : 0,
-               p_class_get_fields ? 1 : 0, p_field_get_name ? 1 : 0,
-               p_field_get_type ? 1 : 0, p_class_get_name ? 1 : 0]);
+        VXSay([NSString stringWithFormat:@"dump api %d%d%d%d%d",
+               p_image_get_class ? 1 : 0, p_class_get_fields ? 1 : 0,
+               p_field_get_name ? 1 : 0, p_field_get_type ? 1 : 0,
+               p_class_get_name ? 1 : 0]);
         return;
     }
 
@@ -433,10 +434,10 @@ static void VXDump(void) {
         fprintf(f, "\n=== %s ===\n", inm ? inm : "?");
         VXSay([NSString stringWithFormat:@"dump %s %d", inm ? inm : "?", clases]);
 
-        size_t cc = p_image_class_count(img);
+        size_t cc = p_image_class_count ? p_image_class_count(img) : 40000;
         for (size_t c = 0; c < cc; c++) {
             void *cls = p_image_get_class(img, (uint32_t)c);
-            if (!cls) continue;
+            if (!cls) { if (p_image_class_count) continue; break; }
             const char *nm = p_class_get_name(cls);
             if (!nm) continue;
             const char *ns = p_class_get_namespace ? p_class_get_namespace(cls) : "";
