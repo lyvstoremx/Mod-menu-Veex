@@ -58,6 +58,7 @@ static const char *(*p_class_get_name)(void *);
 static void *(*p_class_get_parent)(void *);
 
 static BOOL g_ready = NO;
+static void *g_img = NULL;
 static void *g_facade = NULL;
 static void *g_match = NULL;
 static void *g_local = NULL;
@@ -67,6 +68,7 @@ static void *g_m_getTransform = NULL;
 static void *g_m_getPosition = NULL;
 static void *g_m_proj[4] = {NULL, NULL, NULL, NULL};
 static int   g_projCount = 0;
+static BOOL  g_swept = NO;
 
 static void VXResolve(void){
     if (g_ready) return;
@@ -98,7 +100,8 @@ static void VXResolve(void){
         void *img = p_assembly_get_image(asms[i]);
         if (!img) continue;
         for (int k = 0; k < 3 && !g_facade; k++) {
-            g_facade = p_class_from_name(img, nss[k], "GameFacade");
+            void *c = p_class_from_name(img, nss[k], "GameFacade");
+            if (c) { g_facade = c; g_img = img; }
         }
     }
     if (!g_facade) { VXLog(@"FALLO clase GameFacade"); return; }
@@ -107,7 +110,37 @@ static void VXResolve(void){
     g_ready = YES;
 }
 
-static void VXPrepMethods(void){
+static BOOL VXGetCamera(void){
+    if (g_projCount > 0 && VXOk(g_cam)) return YES;
+
+    void *camClass = p_class_from_name(g_img, "UnityEngine", "Camera");
+    if (!camClass) { VXLog(@"FALLO clase Camera"); return NO; }
+
+    if (g_projCount == 0) {
+        const char *nm[4] = { "WorldToViewportPoint_Injected", "WorldToViewportPoint",
+                              "WorldToScreenPoint_Injected", "WorldToScreenPoint" };
+        for (int i = 0; i < 4; i++) {
+            void *m = p_class_get_method_from_name(camClass, nm[i], 1);
+            if (m) g_m_proj[g_projCount++] = m;
+        }
+        VXLog(@"proj resueltos=%d", g_projCount);
+    }
+    if (g_projCount == 0) return NO;
+
+    void *gm = p_class_get_method_from_name(camClass, "get_main", 0);
+    if (gm) {
+        void *exc = NULL;
+        void *c = NULL;
+        @try { c = p_runtime_invoke(gm, NULL, NULL, &exc); } @catch (...) { c = NULL; }
+        if (VXOk(c)) { g_cam = c; VXLog(@"cam main=%p", c); return YES; }
+        VXLog(@"get_main devolvio %p", c);
+    } else {
+        VXLog(@"FALLO get_main");
+    }
+    return NO;
+}
+
+static void VXPrepLocal(void){
     if (g_m_getTransform && g_m_getPosition) return;
 
     void *k = g_facade;
@@ -115,23 +148,26 @@ static void VXPrepMethods(void){
         if (!g_m_getTransform) g_m_getTransform = p_class_get_method_from_name(k, "get_transform", 0);
         k = p_class_get_parent ? p_class_get_parent(k) : NULL;
     }
-
     if (g_local) {
         void *lk = VXAt(g_local, 0);
         if (VXOk(lk)) g_m_getPosition = p_class_get_method_from_name(lk, "get_position", 0);
     }
+}
 
-    if (g_cam) {
-        void *ck = VXAt(g_cam, 0);
-        if (VXOk(ck)) {
-            const char *nm[4] = { "WorldToViewportPoint_Injected", "WorldToViewportPoint",
-                                  "WorldToScreenPoint_Injected", "WorldToScreenPoint" };
-            for (int i = 0; i < 4; i++) {
-                void *m = p_class_get_method_from_name(ck, nm[i], 1);
-                if (m) g_m_proj[g_projCount++] = m;
-            }
-        }
+static void VXSweep(void *match){
+    if (g_swept || !VXOk(match)) return;
+    g_swept = YES;
+    void *mk = VXAt(match, 0);
+    VXLog(@"--- SWEEP match=%p clase=%s ---", match,
+          (mk && p_class_get_name) ? p_class_get_name(mk) : "?");
+    for (size_t off = 0x80; off <= 0x200; off += 8) {
+        void *p = VXAt(match, off);
+        if (!VXOk(p)) continue;
+        size_t s = 0;
+        BOOL got = VXRead((char *)p + 0x18, &s, sizeof(s));
+        VXLog(@"  +0x%zx -> %p sz=%zu", off, p, got ? s : 0);
     }
+    VXLog(@"--- FIN SWEEP ---");
 }
 
 #pragma mark - estado
@@ -229,6 +265,7 @@ static UIView    *g_bubble  = nil;
 static UIView    *g_panel   = nil;
 static BOOL       g_open    = NO;
 static CADisplayLink *g_link = nil;
+static UISwitch  *g_sw      = nil;
 
 @interface VXRoot : UIView
 @end
@@ -262,24 +299,30 @@ static void VXResetGuest(void){
                           (__bridge id)kSecClassKey,
                           (__bridge id)kSecClassCertificate ];
     for (id c in classes) {
-        NSDictionary *q = @{ (__bridge id)kSecClass : c };
-        SecItemDelete((__bridge CFDictionaryRef)q);
+        SecItemDelete((__bridge CFDictionaryRef)@{ (__bridge id)kSecClass : c });
     }
+
+    NSFileManager *fm = [NSFileManager defaultManager];
     NSString *docs = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
     NSString *lib  = [NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES) firstObject];
-    NSFileManager *fm = [NSFileManager defaultManager];
-    for (NSString *base in @[ docs, lib ]) {
-        for (NSString *f in [fm contentsOfDirectoryAtPath:base error:nil]) {
-            if ([f hasSuffix:@".plist"] || [f hasSuffix:@".db"] || [f hasSuffix:@".sqlite"] ||
-                [f containsString:@"com.dts"] || [f containsString:@"Preferences"]) {
-                [fm removeItemAtPath:[base stringByAppendingPathComponent:f] error:nil];
-            }
+
+    NSString *prefs = [lib stringByAppendingPathComponent:@"Preferences"];
+    for (NSString *f in [fm contentsOfDirectoryAtPath:prefs error:nil]) {
+        if ([f containsString:@"freefire"] || [f containsString:@"dts"] || [f containsString:@"garena"]) {
+            [fm removeItemAtPath:[prefs stringByAppendingPathComponent:f] error:nil];
         }
     }
-    VXLog(@"reset guest hecho");
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        exit(0);
-    });
+
+    for (NSString *base in @[ docs,
+                              [lib stringByAppendingPathComponent:@"Caches"],
+                              [lib stringByAppendingPathComponent:@"Application Support"] ]) {
+        for (NSString *f in [fm contentsOfDirectoryAtPath:base error:nil]) {
+            if ([f isEqualToString:@"veex_log.txt"]) continue;
+            [fm removeItemAtPath:[base stringByAppendingPathComponent:f] error:nil];
+        }
+    }
+
+    _exit(0);
 }
 
 #pragma mark - ciclo ESP
@@ -289,6 +332,7 @@ static void VXStopESP(void){
     g_boxN = 0;
     if (g_link) { [g_link invalidate]; g_link = nil; }
     [g_overlay setNeedsDisplay];
+    dispatch_async(dispatch_get_main_queue(), ^{ if (g_sw) [g_sw setOn:NO animated:YES]; });
 }
 
 static void VXTick(void){
@@ -304,30 +348,32 @@ static void VXTick(void){
             VXLog(@"=== ESP ON inicio ===");
             VXResolve();
             if (!g_ready) { VXLog(@"FALLO paso 1"); VXStopESP(); return; }
-            VXLog(@"paso 1 ok");
+        }
+
+        if (g_projCount == 0 || !VXOk(g_cam)) {
+            VXGetCamera();
         }
 
         if (g_step == 1) {
-            g_step = 2;
             void *f = VXAt(g_facade, 0x8);
-            if (!VXOk(f)) { VXLog(@"FALLO paso 2 facade"); VXStopESP(); return; }
-            g_match = VXAt(f, 0x90);
-            if (!VXOk(g_match)) { VXLog(@"FALLO paso 2 match %p", f); VXStopESP(); return; }
-            VXLog(@"paso 2 ok match=%p", g_match);
+            g_match = f ? VXAt(f, 0x90) : NULL;
+            if (!VXOk(g_match)) {
+                g_retry++;
+                if (g_retry > 1200) { VXLog(@"FALLO paso 2 sin match"); VXStopESP(); }
+                return;
+            }
+            g_retry = 0;
+            g_step = 2;
+            VXLog(@"paso 2 match=%p", g_match);
+            VXSweep(g_match);
         }
 
         if (g_step == 2) {
             g_step = 3;
             g_local = VXAt(g_match, 0xD8);
-            void *mg  = VXAt(g_facade, 0x8);
-            void *ccm = mg ? VXAt(mg, 0xD8) : NULL;
-            if (VXOk(ccm)) g_cam = VXAt(ccm, 0x20);
-            VXLog(@"paso 3 local=%p cam=%p", g_local, g_cam);
-            VXPrepMethods();
-            VXLog(@"paso 3 metodos tf=%p pos=%p proj=%d", g_m_getTransform, g_m_getPosition, g_projCount);
-            if (!g_m_getTransform || !g_m_getPosition || g_projCount == 0) {
-                VXLog(@"FALLO paso 3 metodos"); VXStopESP(); return;
-            }
+            VXLog(@"paso 3 local=%p cam=%p proj=%d", g_local, g_cam, g_projCount);
+            VXPrepLocal();
+            VXLog(@"paso 3 tf=%p pos=%p", g_m_getTransform, g_m_getPosition);
         }
 
         if (g_step == 3) {
@@ -341,9 +387,10 @@ static void VXTick(void){
             }
             if (!g_listObj) {
                 g_retry++;
-                if (g_retry > 400) { VXLog(@"FALLO paso 4 sin lista"); VXStopESP(); }
+                if (g_retry > 600) { VXLog(@"FALLO paso 4 sin lista"); VXStopESP(); }
                 return;
             }
+            g_retry = 0;
             g_step = 4;
             VXLog(@"paso 4 lista=%p off=0x%zx", g_listObj, g_listOff);
         }
@@ -408,6 +455,7 @@ static void VXStartESP(void){
     g_step = 0;
     g_retry = 0;
     g_listObj = NULL;
+    g_swept = NO;
     g_esp = YES;
     if (!g_target) g_target = [VXTarget new];
     if (g_link) [g_link invalidate];
@@ -487,9 +535,9 @@ static VXMenu *g_menu = nil;
 
     [g_panel addSubview:VXLabel(@"VEEX 1.132.1", CGRectMake(14, 10, 200, 20), 15)];
 
-    UISwitch *sw = [[UISwitch alloc] initWithFrame:CGRectMake(180, 8, 51, 31)];
-    [sw addTarget:g_menu action:@selector(espChanged:) forControlEvents:UIControlEventValueChanged];
-    [g_panel addSubview:sw];
+    g_sw = [[UISwitch alloc] initWithFrame:CGRectMake(180, 8, 51, 31)];
+    [g_sw addTarget:g_menu action:@selector(espChanged:) forControlEvents:UIControlEventValueChanged];
+    [g_panel addSubview:g_sw];
 
     [g_panel addSubview:VXLabel(@"ESP", CGRectMake(14, 46, 100, 18), 13)];
     [g_panel addSubview:VXBtn(@"COLOR", CGRectMake(120, 42, 110, 30), g_menu, @selector(colorTap))];
@@ -514,12 +562,8 @@ static VXMenu *g_menu = nil;
 }
 
 - (void)espChanged:(UISwitch *)s {
-    if (s.isOn) {
-        VXStartESP();
-    } else {
-        VXStopESP();
-        VXLog(@"ESP OFF");
-    }
+    if (s.isOn) { VXStartESP(); }
+    else { VXStopESP(); VXLog(@"ESP OFF"); }
 }
 
 - (void)colorTap {
@@ -530,17 +574,16 @@ static VXMenu *g_menu = nil;
 }
 
 - (void)estadoTap {
-    NSString *msg = [NSString stringWithFormat:@"L %d  B %d  P %d  D %d\noff 0x%zx  proj %d",
-                     g_L, g_B, g_P, g_D, g_listOff, g_projCount];
+    NSString *msg = [NSString stringWithFormat:
+        @"L %d  B %d  P %d  D %d\noff 0x%zx  proj %d\nmatch %p\ncam %p",
+        g_L, g_B, g_P, g_D, g_listOff, g_projCount, g_match, g_cam];
     UIAlertController *a = [UIAlertController alertControllerWithTitle:@"ESTADO" message:msg
                                                         preferredStyle:UIAlertControllerStyleAlert];
     [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
     [UIApplication.sharedApplication.keyWindow.rootViewController presentViewController:a animated:YES completion:nil];
 }
 
-- (void)resetTap {
-    VXResetGuest();
-}
+- (void)resetTap { VXResetGuest(); }
 
 @end
 
