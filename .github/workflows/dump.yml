@@ -25,12 +25,10 @@ jobs:
           unzip -q w/base.ipa -d w/app
           APP=$(ls -d w/app/Payload/*.app | head -1)
           echo "APP=$APP" >> $GITHUB_ENV
-          ls -la "$APP/Frameworks/UnityFramework.framework/" | head -5
-          ls -la "$APP/Data/Managed/Metadata/" | head -5
 
       - name: Dumper
         run: |
-          git clone --depth 1 https://github.com/tien0246/Il2CppDumper-Free-Fire.git d
+          git clone --depth 1 https://github.com/Perfare/Il2CppDumper.git d
           cd d
           dotnet build -c Release 2>&1 | tail -15
           ls -la Il2CppDumper/bin/Release/net6.0/ | head -20
@@ -64,8 +62,6 @@ jobs:
 
           UF="$APP/Frameworks/UnityFramework.framework/UnityFramework"
           META="$APP/Data/Managed/Metadata/global-metadata.dat"
-          echo "UF=[$UF]"
-          echo "META=[$META]"
           ls -la "$UF" "$META" || true
 
           mkdir -p out
@@ -73,7 +69,6 @@ jobs:
 
           echo "--- salida ---"
           ls -la out || true
-          find . -name "dump.cs" -not -path "./d/*" | head
 
       - name: Extracto
         run: |
