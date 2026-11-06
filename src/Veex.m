@@ -1,7 +1,7 @@
 //
 //  Veex.m
 //  Veex · BY LEVI · t.me/levibrouh
-//  Free Fire 1.132.1 — offsets por puntero, proyeccion viewport, huesos por scan Y
+//  Free Fire 1.132.1 — offsets verificados de dump propio
 //
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
@@ -44,7 +44,7 @@ typedef struct {
     UIColor *line;
 } VXConf;
 
-#pragma mark - offsets 1.132.1
+#pragma mark - offsets 1.132.1 (dump propio, TypeDef 31767 / 32076)
 
 #define O_FACADE_SB      0xB8
 #define O_MATCHGAME      0x8
@@ -89,6 +89,7 @@ static UILabel *g_fps;
 static CADisplayLink *g_link;
 static UIColor *g_accent;
 static NSInteger g_entities;
+static int g_cList, g_cBone, g_cProj;
 static void *g_camCls;
 static void *g_camMain;
 static char g_dbg[220];
@@ -101,6 +102,7 @@ static void *g_matchM;
 static void *g_localM;
 static void *g_playersM;
 static void *g_w2vp;
+static int g_projMode;
 static void *g_getPosInj;
 static void *g_getTransform;
 static void *g_lookAt;
@@ -444,37 +446,58 @@ static BOOL VXExtremeY(void *p, BOOL wantMax, void *tfOut) {
     return winner != NULL;
 }
 
-#pragma mark - proyeccion
+#pragma mark - proyeccion (multi-metodo, auto-detecta pixeles o viewport)
+
+static void *VXProjMethod(void *cam) {
+    if (g_w2vp) return g_w2vp;
+    void *cls = VXClsOf(cam);
+    if (!cls) return NULL;
+    g_w2vp = VXMethod(cls, "WorldToViewportPoint_Injected", 2);
+    if (g_w2vp) { g_projMode = 1; return g_w2vp; }
+    g_w2vp = VXMethod(cls, "WorldToViewportPoint", 1);
+    if (g_w2vp) { g_projMode = 1; return g_w2vp; }
+    g_w2vp = VXMethod(cls, "WorldToScreenPoint_Injected", 2);
+    if (g_w2vp) { g_projMode = 2; return g_w2vp; }
+    g_w2vp = VXMethod(cls, "WorldToScreenPoint", 1);
+    if (g_w2vp) { g_projMode = 2; return g_w2vp; }
+    return NULL;
+}
 
 static BOOL VXProject(V3 w, CGPoint *out, float *depth) {
     void *cam = VXCam();
     if (!cam) return NO;
-    if (!g_w2vp) g_w2vp = VXMethod(VXClsOf(cam), "WorldToViewportPoint_Injected", 2);
-    if (!g_w2vp) g_w2vp = VXMethod(VXClsOf(cam), "WorldToViewportPoint", 1);
+    void *m = VXProjMethod(cam);
+    if (!m) return NO;
 
     V3 vp;
     memset(&vp, 0, sizeof vp);
+    uint32_t argc = p_method_get_param_count ? p_method_get_param_count(m) : 0;
 
-    if (g_w2vp && p_method_get_param_count && p_method_get_param_count(g_w2vp) == 2) {
+    if (argc == 2) {
         void *a[2] = { &w, &vp };
         void *e = NULL;
-        p_runtime_invoke(g_w2vp, cam, a, &e);
+        p_runtime_invoke(m, cam, a, &e);
         if (e) return NO;
-    } else if (g_w2vp) {
+    } else {
         void *a[1] = { &w };
         void *e = NULL;
-        void *r = p_runtime_invoke(g_w2vp, cam, a, &e);
+        void *r = p_runtime_invoke(m, cam, a, &e);
         if (!r || e) return NO;
         memcpy(&vp, (char *)r + 16, sizeof(V3));
-    } else {
-        return NO;
     }
 
     if (vp.z < 0.01f) return NO;
+    if (isnan(vp.x) || isnan(vp.y)) return NO;
+    if (fabsf(vp.x) > 40000.0f || fabsf(vp.y) > 40000.0f) return NO;
 
     CGSize s = VXSize();
-    out->x = vp.x * s.width;
-    out->y = (1.0f - vp.y) * s.height;
+    if (g_projMode == 2 || fabsf(vp.x) > 1.5f) {
+        out->x = vp.x;
+        out->y = s.height - vp.y;
+    } else {
+        out->x = vp.x * s.width;
+        out->y = (1.0f - vp.y) * s.height;
+    }
     if (depth) *depth = vp.z;
     return YES;
 }
@@ -501,6 +524,7 @@ static int VXPass(void *items, int cnt, void *local, V3 lpos, BOOL hasL, int lte
         if (!VXExtremeY(p, YES, &htf)) htf = VXTransformOf(p);
         if (!VXExtremeY(p, NO, &ttf)) ttf = VXTransformOf(p);
         if (!htf || !ttf) continue;
+        g_cBone++;
 
         V3 head, toe;
         if (!VXPosOf(htf, &head)) continue;
@@ -514,6 +538,7 @@ static int VXPass(void *items, int cnt, void *local, V3 lpos, BOOL hasL, int lte
         if (!VXProject(head, &hs, &hd)) continue;
         if (!VXProject(toe, &ts, NULL)) continue;
         if (hd < 0.05f) continue;
+        g_cProj++;
 
         VXEnt *e = &g_tmp[out];
         memset(e, 0, sizeof *e);
@@ -568,6 +593,9 @@ static void VXCollect(void) {
     }
 
     VXAttach();
+    g_cBone = 0;
+    g_cProj = 0;
+    g_cList = 0;
 
     void *cam = VXCam();
     if (!cam) return;
@@ -580,6 +608,7 @@ static void VXCollect(void) {
 
     int cnt = 0;
     void *items = VXList(&cnt);
+    g_cList = cnt;
     if (!items || cnt <= 0) {
         pthread_mutex_lock(&g_mtx);
         g_sn = 0;
@@ -600,7 +629,7 @@ static void VXCollect(void) {
 
 static NSString *VXReport(void) {
     NSMutableString *s = [NSMutableString string];
-    [s appendString:@"VEEX\n"];
+    [s appendFormat:@"L%d B%d P%d D%ld\n", g_cList, g_cBone, g_cProj, (long)g_entities];
     [s appendFormat:@"api %d\n", p_domain_get ? 1 : 0];
     [s appendFormat:@"facade %p\n", g_facadeCls];
     [s appendFormat:@"mg %p\n", VXMatchGame()];
@@ -608,23 +637,15 @@ static NSString *VXReport(void) {
     [s appendFormat:@"match %p\n", m];
     [s appendFormat:@"cam %p\n", VXCam()];
     [s appendFormat:@"local %p\n", VXLocal()];
-    int n = 0;
-    void *l = VXList(&n);
-    [s appendFormat:@"items %p n=%d\n", l, n];
-    if (l && n > 0) {
-        void *p = VXItem(l, 0);
-        [s appendFormat:@"item0 %p team %d\n", p, VXTeam(p)];
-    }
-    [s appendFormat:@"w2vp %p\n", g_w2vp];
+    [s appendFormat:@"w2vp %p modo %d\n", g_w2vp, g_projMode];
     [s appendFormat:@"pos %p\n", g_getPosInj];
-    [s appendFormat:@"dib %ld\n", (long)g_entities];
-    if (n == 0) [s appendString:@"(lobby? entra a partida)"];
+    [s appendFormat:@"nodos %zu\n", g_neck];
     return s;
 }
 
 static void VXShow(NSString *t) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (g_status) g_status.text = t.length > 220 ? [t substringToIndex:220] : t;
+        if (g_status) g_status.text = t.length > 240 ? [t substringToIndex:240] : t;
     });
 }
 
@@ -783,9 +804,9 @@ static void VXAimStep(void) {
 
     g_entities = drawn;
     if (g.diag) {
-        snprintf(g_dbg, sizeof(g_dbg), "n %d dib %ld", n, (long)drawn);
+        snprintf(g_dbg, sizeof(g_dbg), "L%d B%d P%d D%ld", g_cList, g_cBone, g_cProj, (long)drawn);
         [[NSString stringWithUTF8String:g_dbg] drawAtPoint:CGPointMake(12, sz.height * 0.5)
-            withAttributes:@{ NSFontAttributeName: [UIFont boldSystemFontOfSize:12],
+            withAttributes:@{ NSFontAttributeName: [UIFont boldSystemFontOfSize:14],
                               NSForegroundColorAttributeName: [UIColor whiteColor] }];
     }
 }
@@ -881,10 +902,7 @@ static void VXAimStep(void) {
         case 113: g_panel.hidden = YES; break;
         case 114: [self doReset]; break;
         case 115: g.thin = !g.thin; break;
-        case 116:
-            g.stream = !g.stream;
-            g_panel.hidden = YES;
-            break;
+        case 116: g.stream = !g.stream; g_panel.hidden = YES; break;
     }
     [self paint:b];
 }
