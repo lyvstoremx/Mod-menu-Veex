@@ -146,6 +146,11 @@ static BOOL VXPtr(void *p) {
     return p && v > 0x10000 && v < 0x8000000000ULL;
 }
 
+static void *VXClsOf(void *obj) {
+    if (!obj) return NULL;
+    return (__bridge void *)object_getClass((__bridge id)obj);
+}
+
 #pragma mark - estado
 
 static struct {
@@ -232,7 +237,7 @@ static void *VXPosMethod(void *tr) {
     static void *k[32];
     static void *m[32];
     static int n;
-    void *cls = (void *)object_getClass((__bridge id)tr);
+    void *cls = VXClsOf(tr);
     for (int i = 0; i < n; i++) if (k[i] == cls) return m[i];
     void *mm = VXMethod(cls, "get_position", 0);
     if (n < 32) { k[n] = cls; m[n] = mm; n++; }
@@ -251,7 +256,7 @@ static void *VXCamera(void) {
 
 static BOOL VXWorldToScreen(void *cam, V3 w, CGPoint *out) {
     if (!cam) return NO;
-    void *mm = VXMethod((void *)object_getClass((__bridge id)cam), "WorldToScreenPoint", 1);
+    void *mm = VXMethod(VXClsOf(cam), "WorldToScreenPoint", 1);
     if (!mm && g_camCls) mm = VXMethod(g_camCls, "WorldToScreenPoint", 1);
     if (!mm) return NO;
     void *args[1] = { &w };
@@ -268,7 +273,7 @@ static BOOL VXWorldToScreen(void *cam, V3 w, CGPoint *out) {
 
 static NSString *VXExcMsg(void *exc) {
     if (!exc) return @"?";
-    void *cls = (void *)object_getClass((__bridge id)exc);
+    void *cls = VXClsOf(exc);
     void *mm = VXMethod(cls, "get_Message", 0);
     if (!mm) return @"?";
     void *e2 = NULL;
