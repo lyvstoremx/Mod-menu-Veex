@@ -941,40 +941,42 @@ static void VXAimStep(void) {
 }
 
 - (void)doReset {
-    VXShow(@"reset guest...");
+    VXShow(@"reseteando...");
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
         @try {
-            NSDictionary *q1 = @{ (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword };
-            SecItemDelete((__bridge CFDictionaryRef)q1);
-            NSDictionary *q2 = @{ (__bridge id)kSecClass: (__bridge id)kSecClassInternetPassword };
-            SecItemDelete((__bridge CFDictionaryRef)q2);
+            NSArray *classes = @[ (__bridge id)kSecClassGenericPassword,
+                                  (__bridge id)kSecClassInternetPassword,
+                                  (__bridge id)kSecClassKey,
+                                  (__bridge id)kSecClassCertificate ];
+            for (id c in classes) {
+                NSDictionary *q = @{ (__bridge id)kSecClass: c };
+                SecItemDelete((__bridge CFDictionaryRef)q);
+            }
 
-            NSArray *keys = @[ @"guest", @"account", @"login", @"session", @"token", @"uid" ];
             NSFileManager *fm = [NSFileManager defaultManager];
             NSString *docs = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
+            NSString *lib = [NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES) firstObject];
+
             if (docs) {
                 for (NSString *f in [fm contentsOfDirectoryAtPath:docs error:nil]) {
-                    NSString *low = f.lowercaseString;
-                    for (NSString *k in keys) {
-                        if ([low containsString:k]) {
-                            [fm removeItemAtPath:[docs stringByAppendingPathComponent:f] error:nil];
-                            break;
-                        }
+                    [fm removeItemAtPath:[docs stringByAppendingPathComponent:f] error:nil];
+                }
+            }
+            if (lib) {
+                for (NSString *sub in @[@"Preferences", @"Caches", @"Saved Application State"]) {
+                    NSString *p = [lib stringByAppendingPathComponent:sub];
+                    for (NSString *f in [fm contentsOfDirectoryAtPath:p error:nil]) {
+                        [fm removeItemAtPath:[p stringByAppendingPathComponent:f] error:nil];
                     }
                 }
             }
-            NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
-            for (NSString *k in d.dictionaryRepresentation.allKeys) {
-                NSString *low = k.lowercaseString;
-                for (NSString *n in keys) {
-                    if ([low containsString:n]) { [d removeObjectForKey:k]; break; }
-                }
-            }
-            [d synchronize];
-            VXShow(@"reset ok · cierra y abre");
-        } @catch (NSException *ex) {
-            VXShow(@"reset fallo");
-        }
+        } @catch (NSException *ex) {}
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            VXShow(@"reset ok · cerrando");
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)),
+                           dispatch_get_main_queue(), ^{ exit(0); });
+        });
     });
 }
 
