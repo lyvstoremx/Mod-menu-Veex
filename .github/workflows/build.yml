@@ -21,9 +21,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p work
-          gh release download base --repo "$GITHUB_REPOSITORY" --pattern "*.ipa" --dir work --clobber
-          f=$(ls work/*.ipa | head -1)
+          gh release download base --repo "$GITHUB_REPOSITORY" --pattern "com.dts.freefireth*.ipa" --dir work --clobber
+          f=$(ls work/com.dts.freefireth*.ipa | head -1)
           mv "$f" work/base.ipa
+          rm -f work/Veex.ipa work/Veex54.ipa
           ls -la work/base.ipa
 
       - name: Desempaquetar
@@ -35,6 +36,7 @@ jobs:
           cd ..
           APP=$(ls -d work/app/Payload/*.app | head -1)
           echo "APP=$APP" >> $GITHUB_ENV
+          echo "NAME=$(basename "$APP")" >> $GITHUB_ENV
           ls "$APP" | head -30
 
       - name: Compilar dylib
