@@ -173,14 +173,19 @@ static void *VXMethod(void *cls, const char *name, int argc) {
     return p_class_get_method_from_name(cls, name, argc);
 }
 
-static size_t VXFieldOffset(void *cls, const char *name) {
+static void *VXStaticField(void *cls, const char *name) {
     void *c = cls;
-    for (int depth = 0; c && depth < 12; depth++) {
+    for (int d = 0; c && d < 12; d++) {
         void *f = p_class_get_field_from_name(c, name);
-        if (f) return p_field_get_offset(f);
+        if (f) return f;
         c = p_class_get_parent ? p_class_get_parent(c) : NULL;
     }
-    return 0;
+    return NULL;
+}
+
+static size_t VXFieldOffset(void *cls, const char *name) {
+    void *f = VXStaticField(cls, name);
+    return f ? p_field_get_offset(f) : 0;
 }
 
 static BOOL VXPtr(void *p) {
@@ -260,15 +265,20 @@ static NSString *VXExcMsg(void *exc);
 
 static void *VXTrigger(void) {
     if (!g_triggerCls) {
-        g_triggerCls = VXClass("", "SpawnObjectCrossHairTrigger");
-        if (g_triggerCls) g_trOff = VXFieldOffset(g_triggerCls, "transform");
+        const char *cand[] = { "SpawnObjectCrossHairTrigger", "CrossHairTrigger",
+                               "AimAssistTrigger", "SpawnTrigger", "CrossHairManager" };
+        for (int i = 0; i < 5; i++) {
+            void *c = VXClass("", cand[i]);
+            if (c) { g_triggerCls = c; break; }
+        }
     }
-    if (!g_triggerCls) return NULL;
-    void *f = p_class_get_field_from_name(g_triggerCls, "ActiveInstance");
-    if (!f) return NULL;
+    if (!g_triggerCls) { g_dbg = @"sin clase trig"; return NULL; }
+    void *f = VXStaticField(g_triggerCls, "ActiveInstance");
+    if (!f) { g_dbg = @"sin ActiveInstance"; return NULL; }
     void *inst = NULL;
     p_field_static_get_value(f, &inst);
-    return VXPtr(inst) ? inst : NULL;
+    if (!VXPtr(inst)) { g_dbg = @"inst nula"; return NULL; }
+    return inst;
 }
 
 static void *VXTransformOf(void *obj) {
@@ -351,6 +361,7 @@ static void VXDump(void) {
         if (!img) continue;
         const char *inm = p_image_get_name(img);
         fprintf(f, "\n=== %s ===\n", inm ? inm : "?");
+        VXSay([NSString stringWithFormat:@"dump %s %d", inm ? inm : "?", clases]);
 
         size_t cc = p_image_class_count(img);
         for (size_t c = 0; c < cc; c++) {
@@ -614,7 +625,7 @@ static int VXResetGuest(NSMutableString *log) {
     if (!cam) return;
 
     void *trg = VXTrigger();
-    if (!trg) { g_dbg = @"sin trigger"; return; }
+    if (!trg) return;
     void *dict = *(void **)((char *)trg + 0x50);
     if (!VXPtr(dict)) { g_dbg = @"dict mala"; return; }
 
@@ -801,17 +812,26 @@ static void VXShowResetCard(void) {
     if (!d.length) { g_status.text = @"sin dump"; return; }
 
     g_status.text = [NSString stringWithFormat:@"subiendo %lu KB", (unsigned long)(d.length / 1024)];
-    NSMutableURLRequest *r = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://paste.rs"]];
+    NSString *b = @"----veexb";
+    NSMutableData *body = [NSMutableData data];
+    [body appendData:[[NSString stringWithFormat:@"--%@\r\n", b] dataUsingEncoding:NSUTF8StringEncoding]];
+    [body appendData:[@"Content-Disposition: form-data; name=\"file\"; filename=\"veexdump.txt\"\r\n" dataUsingEncoding:NSUTF8StringEncoding]];
+    [body appendData:[@"Content-Type: text/plain\r\n\r\n" dataUsingEncoding:NSUTF8StringEncoding]];
+    [body appendData:d];
+    [body appendData:[[NSString stringWithFormat:@"\r\n--%@--\r\n", b] dataUsingEncoding:NSUTF8StringEncoding]];
+
+    NSMutableURLRequest *r = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://0x0.st"]];
     r.HTTPMethod = @"POST";
-    r.HTTPBody = d;
-    r.timeoutInterval = 180;
-    [r setValue:@"text/plain" forHTTPHeaderField:@"Content-Type"];
+    r.timeoutInterval = 240;
+    [r setValue:[NSString stringWithFormat:@"multipart/form-data; boundary=%@", b] forHTTPHeaderField:@"Content-Type"];
+    [r setValue:@"Mozilla/5.0 (iPhone)" forHTTPHeaderField:@"User-Agent"];
+    r.HTTPBody = body;
 
     [[[NSURLSession sharedSession] dataTaskWithRequest:r
         completionHandler:^(NSData *rd, NSURLResponse *rs, NSError *e) {
             NSString *s = rd ? [[NSString alloc] initWithData:rd encoding:NSUTF8StringEncoding] : nil;
             dispatch_async(dispatch_get_main_queue(), ^{
-                if (s.length && [s hasPrefix:@"http"]) {
+                if (s.length && [s containsString:@"http"]) {
                     g_status.text = s;
                     UIPasteboard.generalPasteboard.string = s;
                 } else {
