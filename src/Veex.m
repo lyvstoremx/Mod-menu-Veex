@@ -40,6 +40,13 @@ static void *VXAt(void *base, size_t off){
     return p;
 }
 
+static int VXInt(void *base, size_t off){
+    if (!base) return 0;
+    int v = 0;
+    if (!VXRead((char *)base + off, &v, sizeof(v))) return 0;
+    return v;
+}
+
 static BOOL VXOk(void *p){
     if (!p) return NO;
     uintptr_t v = (uintptr_t)p;
@@ -52,10 +59,7 @@ static void *(*p_domain_get)(void);
 static void **(*p_domain_get_assemblies)(void *, size_t *);
 static void *(*p_assembly_get_image)(void *);
 static void *(*p_class_from_name)(void *, const char *, const char *);
-static void *(*p_class_get_method_from_name)(void *, const char *, int);
-static void *(*p_runtime_invoke)(void *, void *, void **, void **);
 static const char *(*p_class_get_name)(void *);
-static void *(*p_class_get_parent)(void *);
 static void *(*p_class_get_field_from_name)(void *, const char *);
 static void  (*p_field_static_get_value)(void *, void *);
 
@@ -66,10 +70,6 @@ static void *g_match = NULL;
 static void *g_local = NULL;
 static void *g_cam = NULL;
 
-static void *g_m_getTransform = NULL;
-static void *g_m_getPosition = NULL;
-static void *g_m_proj[4] = {NULL, NULL, NULL, NULL};
-static int   g_projCount = 0;
 static float g_mtx[16];
 static BOOL  g_mtxOk = NO;
 static BOOL  g_swept = NO;
@@ -110,15 +110,11 @@ static void VXResolve(void){
     p_domain_get_assemblies      = dlsym(RTLD_DEFAULT, "il2cpp_domain_get_assemblies");
     p_assembly_get_image         = dlsym(RTLD_DEFAULT, "il2cpp_assembly_get_image");
     p_class_from_name            = dlsym(RTLD_DEFAULT, "il2cpp_class_from_name");
-    p_class_get_method_from_name = dlsym(RTLD_DEFAULT, "il2cpp_class_get_method_from_name");
-    p_runtime_invoke             = dlsym(RTLD_DEFAULT, "il2cpp_runtime_invoke");
     p_class_get_name             = dlsym(RTLD_DEFAULT, "il2cpp_class_get_name");
-    p_class_get_parent           = dlsym(RTLD_DEFAULT, "il2cpp_class_get_parent");
     p_class_get_field_from_name  = dlsym(RTLD_DEFAULT, "il2cpp_class_get_field_from_name");
     p_field_static_get_value     = dlsym(RTLD_DEFAULT, "il2cpp_field_static_get_value");
 
-    if (!p_domain_get || !p_domain_get_assemblies || !p_assembly_get_image ||
-        !p_class_from_name || !p_class_get_method_from_name || !p_runtime_invoke) {
+    if (!p_domain_get || !p_domain_get_assemblies || !p_assembly_get_image || !p_class_from_name) {
         VXLog(@"FALLO dlsym il2cpp");
         return;
     }
@@ -143,55 +139,109 @@ static void VXResolve(void){
     if (p_class_get_field_from_name) {
         g_fCurrentMatchGame = p_class_get_field_from_name(g_facade, "CurrentMatchGame");
     }
-    void *sb = VXAt(g_facade, 0xB8);
-    VXLog(@"api OK facade=%p campo=%p sb=%p", g_facade, g_fCurrentMatchGame, sb);
+    VXLog(@"api OK facade=%p", g_facade);
     g_ready = YES;
 }
 
-static BOOL VXGetCamera(void){
-    if (g_projCount > 0 && VXOk(g_cam)) return YES;
+#pragma mark - posición por matrices de Unity
 
-    void *mg = VXFacadeObj();
-    if (!VXOk(mg)) return NO;
+typedef struct { float px, py, pz; float rx, ry, rz, rw; float sx, sy, sz; } VXTMat;
 
-    size_t moffs[3] = { 0xD8, 0xD0, 0xE0 };
-    void *ccm = NULL;
-    for (int i = 0; i < 3 && !VXOk(ccm); i++) ccm = VXAt(mg, moffs[i]);
-    if (!VXOk(ccm)) return NO;
+static BOOL VXPos(void *node, CGPoint *out){
+    void *t = VXAt(node, 0x10);
+    if (!VXOk(t)) return NO;
+    void *mtx = VXAt(t, 0x38);
+    if (!VXOk(mtx)) return NO;
+    void *list = VXAt(mtx, 0x18);
+    void *indices = VXAt(mtx, 0x20);
+    if (!VXOk(list) || !VXOk(indices)) return NO;
 
-    size_t coffs[4] = { 0x20, 0x18, 0x28, 0x10 };
-    void *cam = NULL;
-    for (int i = 0; i < 4 && !VXOk(cam); i++) cam = VXAt(ccm, coffs[i]);
-    if (!VXOk(cam)) return NO;
+    int index = VXInt(t, 0x40);
+    if (index < 0 || index > 4096) return NO;
 
-    void *klass = VXAt(cam, 0);
-    if (!VXOk(klass)) return NO;
+    VXTMat base;
+    if (!VXRead((char *)list + 40 * index, &base, 40)) return NO;
 
-    if (g_projCount == 0) {
-        const char *nm[4] = { "WorldToViewportPoint_Injected", "WorldToViewportPoint",
-                              "WorldToScreenPoint_Injected", "WorldToScreenPoint" };
-        for (int i = 0; i < 4; i++) {
-            void *m = p_class_get_method_from_name(klass, nm[i], 1);
-            if (m) g_m_proj[g_projCount++] = m;
-        }
-        VXLog(@"proj resueltos=%d", g_projCount);
+    float rx = base.px, ry = base.py, rz = base.pz;
+    int ti = VXInt(indices, 4 * index);
+    int guard = 0;
+
+    while (ti >= 0 && guard++ < 64) {
+        VXTMat m;
+        if (!VXRead((char *)list + 40 * ti, &m, 40)) break;
+        float sX = rx * m.sx, sY = ry * m.sy, sZ = rz * m.sz;
+        float qx = m.rx, qy = m.ry, qz = m.rz, qw = m.rw;
+        float nx = m.px + sX + (sX * ((qy * qy * -2.0f) - (qz * qz * 2.0f)))
+                 + (sY * ((qw * qz * -2.0f) - (qy * qx * -2.0f)))
+                 + (sZ * ((qz * qx * 2.0f) - (qw * qy * -2.0f)));
+        float ny = m.py + sY + (sX * ((qx * qy * 2.0f) - (qw * qz * -2.0f)))
+                 + (sY * ((qz * qz * -2.0f) - (qx * qx * 2.0f)))
+                 + (sZ * ((qw * qx * -2.0f) - (qz * qy * -2.0f)));
+        float nz = m.pz + sZ + (sX * ((qw * qy * -2.0f) - (qx * qz * -2.0f)))
+                 + (sY * ((qy * qz * 2.0f) - (qw * qx * -2.0f)))
+                 + (sZ * ((qx * qx * -2.0f) - (qy * qy * 2.0f)));
+        rx = nx; ry = ny; rz = nz;
+        ti = VXInt(indices, 4 * ti);
     }
 
-    g_cam = cam;
-    VXLog(@"cam=%p proj=%d", cam, g_projCount);
+    out->x = rx;
+    out->y = ry;
     return YES;
 }
 
-static void VXPrepLocal(void){
-    if (g_m_getTransform) return;
-    void *lk = g_local ? VXAt(g_local, 0) : NULL;
-    if (!VXOk(lk)) return;
-    void *k = lk;
-    for (int i = 0; i < 12 && k; i++) {
-        if (!g_m_getTransform) g_m_getTransform = p_class_get_method_from_name(k, "get_transform", 0);
-        if (g_m_getTransform) break;
-        k = p_class_get_parent ? p_class_get_parent(k) : NULL;
+static const int kNodes[] = {
+    0x698, 0x6A0, 0x6A8, 0x6B0, 0x6B8, 0x6C0, 0x6C8, 0x6D0,
+    0x6D8, 0x6E0, 0x6E8, 0x6F0, 0x6F8, 0x708, 0x710, 0x718,
+    0x720, 0x728, 0x730
+};
+static const int kNodeCount = 19;
+
+static BOOL VXHeadToe(void *pl, CGPoint *head, CGPoint *toe){
+    float hi = -1e9f, lo = 1e9f;
+    CGPoint ph = {0,0}, pt = {0,0};
+    BOOL hasH = NO, hasT = NO;
+    for (int i = 0; i < kNodeCount; i++) {
+        void *node = VXAt(pl, kNodes[i]);
+        if (!VXOk(node)) continue;
+        CGPoint p;
+        if (!VXPos(node, &p)) continue;
+        if (fabsf(p.x) > 20000.0f || fabsf(p.y) > 20000.0f) continue;
+        if (p.y > hi) { hi = p.y; ph = p; hasH = YES; }
+        if (p.y < lo) { lo = p.y; pt = p; hasT = YES; }
     }
+    if (!hasH || !hasT) return NO;
+    *head = ph;
+    *toe = pt;
+    return YES;
+}
+
+#pragma mark - barrido de contenedor
+
+static BOOL VXScanOne(void *obj, void **oObj, size_t *oOff, int *oN, BOOL *oDict){
+    BOOL found = NO; int best = 0;
+    for (size_t off = 0x80; off <= 0x400; off += 8) {
+        void *l = VXAt(obj, off);
+        if (!VXOk(l)) continue;
+
+        void *it = VXAt(l, 0x10);
+        if (VXOk(it)) {
+            void *f0 = VXAt(it, 0x20);
+            int s = VXInt(l, 0x18);
+            if (VXOk(f0) && s > 0 && s < 300 && s > best) {
+                *oObj = l; *oOff = off; *oN = s; *oDict = NO; best = s; found = YES;
+            }
+        }
+
+        void *ent = VXAt(l, 0x18);
+        if (VXOk(ent)) {
+            int c = VXInt(l, 0x20);
+            void *v0 = VXAt(ent, 0x30);
+            if (VXOk(v0) && c > 0 && c < 300 && c > best) {
+                *oObj = l; *oOff = off; *oN = c; *oDict = YES; best = c; found = YES;
+            }
+        }
+    }
+    return found;
 }
 
 static void VXSweep(void *match){
@@ -203,9 +253,7 @@ static void VXSweep(void *match){
     for (size_t off = 0x80; off <= 0x900; off += 8) {
         void *p = VXAt(match, off);
         if (!VXOk(p)) continue;
-        size_t s = 0;
-        BOOL got = VXRead((char *)p + 0x18, &s, sizeof(s));
-        VXLog(@"  +0x%zx -> %p sz=%zu", off, p, got ? s : 0);
+        VXLog(@"  +0x%zx -> %p n=%d", off, p, VXInt(p, 0x18));
     }
     VXLog(@"--- FIN SWEEP ---");
 }
@@ -233,42 +281,16 @@ static UIColor *VXC(void){
 
 #pragma mark - proyección
 
-static BOOL VXProj(void *cam, CGPoint world, CGSize sz, CGPoint *out){
+static BOOL VXProj(CGPoint world, CGSize sz, CGPoint *out){
+    if (!g_mtxOk) return NO;
     float x = (float)world.x, y = (float)world.y, z = 0.0f;
-
-    if (g_mtxOk) {
-        float w = g_mtx[3] * x + g_mtx[7] * y + g_mtx[11] * z + g_mtx[15];
-        if (w < 0.5f) w = 0.5f;
-        float nx = (g_mtx[0] * x + g_mtx[4] * y + g_mtx[8] * z + g_mtx[12]) / w;
-        float ny = (g_mtx[1] * x + g_mtx[5] * y + g_mtx[9] * z + g_mtx[13]) / w;
-        out->x = (sz.width / 2.0f) + nx * (sz.width / 2.0f);
-        out->y = (sz.height / 2.0f) - ny * (sz.height / 2.0f);
-        return YES;
-    }
-
-    if (!cam || g_projCount == 0) return NO;
-    float v[3] = { x, y, z };
-    for (int i = 0; i < g_projCount; i++) {
-        void *args[1] = { v };
-        void *exc = NULL;
-        float *r = NULL;
-        @try { r = (float *)p_runtime_invoke(g_m_proj[i], cam, args, &exc); } @catch (...) { r = NULL; }
-        if (!r) continue;
-        float rx = r[0], ry = r[1], rz = r[2];
-        if (rx != rx || ry != ry) continue;
-        BOOL norm = (fabsf(rx) <= 1.5f && fabsf(ry) <= 1.5f);
-        if (norm) {
-            if (rx < -0.05f || rx > 1.05f || ry < -0.05f || ry > 1.05f) continue;
-            out->x = rx * sz.width;
-            out->y = (1.0f - ry) * sz.height;
-        } else {
-            if (rz < 0.01f) continue;
-            out->x = rx;
-            out->y = sz.height - ry;
-        }
-        return YES;
-    }
-    return NO;
+    float w = g_mtx[3] * x + g_mtx[7] * y + g_mtx[11] * z + g_mtx[15];
+    if (w < 0.5f) w = 0.5f;
+    float nx = (g_mtx[0] * x + g_mtx[4] * y + g_mtx[8] * z + g_mtx[12]) / w;
+    float ny = (g_mtx[1] * x + g_mtx[5] * y + g_mtx[9] * z + g_mtx[13]) / w;
+    out->x = (sz.width / 2.0f) + nx * (sz.width / 2.0f);
+    out->y = (sz.height / 2.0f) - ny * (sz.height / 2.0f);
+    return YES;
 }
 
 #pragma mark - overlay
@@ -291,8 +313,7 @@ static BOOL VXProj(void *cam, CGPoint world, CGSize sz, CGPoint *out){
     if (!ctx || g_boxN == 0) return;
     UIColor *col = VXC();
     CGContextSetStrokeColorWithColor(ctx, col.CGColor);
-    CGContextSetLineWidth(ctx, 1.2);
-    CGContextSetFillColorWithColor(ctx, [col colorWithAlphaComponent:0.12].CGColor);
+    CGContextSetLineWidth(ctx, 1.5);
     for (int i = 0; i < g_boxN; i++) {
         CGPoint a = g_box[i][0], b = g_box[i][1], c = g_box[i][2], d = g_box[i][3];
         CGContextMoveToPoint(ctx, a.x, a.y);
@@ -300,9 +321,7 @@ static BOOL VXProj(void *cam, CGPoint world, CGSize sz, CGPoint *out){
         CGContextAddLineToPoint(ctx, c.x, c.y);
         CGContextAddLineToPoint(ctx, d.x, d.y);
         CGContextClosePath(ctx);
-        CGContextDrawPath(ctx, kCGPathFillStroke);
-        CGPoint h = g_box[i][3];
-        CGContextFillRect(ctx, CGRectMake(h.x - 1.5, h.y - 1.5, 3, 3));
+        CGContextStrokePath(ctx);
     }
 }
 @end
@@ -400,138 +419,113 @@ static void VXTick(void){
             if (!g_ready) { VXLog(@"FALLO paso 1"); VXStopESP(); return; }
         }
 
-        if (g_projCount == 0 || !VXOk(g_cam)) VXGetCamera();
+        if (!VXOk(g_cam)) {
+            void *mg = VXFacadeObj();
+            void *ccm = mg ? VXAt(mg, 0xD8) : NULL;
+            if (VXOk(ccm)) g_cam = VXAt(ccm, 0x20);
+        }
         VXLoadMatrix();
-        if (g_retry % 300 == 299) VXLog(@"mtx=%d proj=%d", g_mtxOk, g_projCount);
 
         if (g_step == 1) {
             void *f = VXFacadeObj();
             g_match = f ? VXAt(f, 0x90) : NULL;
             if (!VXOk(g_match)) {
                 g_retry++;
-                if (g_retry % 300 == 0) VXLog(@"esperando match (%d) f=%p cam=%p proj=%d", g_retry, f, g_cam, g_projCount);
+                if (g_retry % 300 == 0) VXLog(@"esperando match (%d)", g_retry);
                 return;
             }
             g_retry = 0;
             g_step = 2;
-            VXLog(@"paso 2 match=%p", g_match);
+            VXLog(@"paso 2 match=%p cam=%p mtx=%d", g_match, g_cam, g_mtxOk);
             VXSweep(g_match);
         }
 
         if (g_step == 2) {
             g_step = 3;
             g_local = VXAt(g_match, 0xD8);
-            void *lk2 = g_local ? VXAt(g_local, 0) : NULL;
-            VXLog(@"paso 3 local=%p clase=%s", g_local, (lk2 && p_class_get_name) ? p_class_get_name(lk2) : "?");
-            VXPrepLocal();
-            VXLog(@"paso 3 tf=%p", g_m_getTransform);
+            VXLog(@"paso 3 local=%p", g_local);
         }
 
         if (g_step == 3) {
             g_retry++;
             if (g_retry % 45 != 0) return;
-            void *best = NULL; size_t bestOff = 0, bestSz = 0; BOOL bestDict = NO;
-            for (size_t off = 0x80; off <= 0x900; off += 8) {
-                void *l = VXAt(g_match, off);
-                if (!VXOk(l)) continue;
 
-                void *it = VXAt(l, 0x10);
-                if (VXOk(it)) {
-                    void *first = VXAt(it, 0x20);
-                    size_t s = 0;
-                    VXRead((char *)l + 0x18, &s, sizeof(s));
-                    if (VXOk(first) && s > 0 && s < 300 && s > bestSz) {
-                        best = l; bestOff = off; bestSz = s; bestDict = NO;
-                    }
-                }
+            void *b = NULL; size_t bOff = 0; int bN = 0; BOOL bD = NO;
+            int depth = 0;
 
-                void *ent = VXAt(l, 0x18);
-                if (VXOk(ent)) {
-                    size_t c = 0;
-                    VXRead((char *)l + 0x20, &c, sizeof(c));
-                    void *v0 = VXAt(ent, 0x30);
-                    if (VXOk(v0) && c > 0 && c < 300 && c > bestSz) {
-                        best = l; bestOff = off; bestSz = c; bestDict = YES;
+            if (VXScanOne(g_match, &b, &bOff, &bN, &bD)) depth = 1;
+            else {
+                void *mg2 = VXFacadeObj();
+                if (VXOk(mg2) && VXScanOne(mg2, &b, &bOff, &bN, &bD)) depth = 2;
+                else {
+                    int tried = 0;
+                    for (size_t off = 0x80; off <= 0x400 && tried < 40 && !b; off += 8) {
+                        void *o = VXAt(g_match, off);
+                        if (!VXOk(o)) continue;
+                        void *k = VXAt(o, 0);
+                        if (!VXOk(k)) continue;
+                        tried++;
+                        if (VXScanOne(o, &b, &bOff, &bN, &bD)) depth = 3;
                     }
+                    if (!b && g_retry % 300 == 0) VXLog(@"sin contenedor (%d) tried=%d", g_retry, tried);
                 }
             }
-            if (!best) {
-                if (g_retry % 300 == 0) VXLog(@"sin lista (%d)", g_retry);
-                return;
-            }
+            if (!b) return;
+
             g_retry = 0;
-            g_listObj = best;
-            g_listOff = bestOff;
-            g_dict = bestDict;
+            g_listObj = b;
+            g_listOff = bOff;
+            g_dict = bD;
             g_step = 4;
-            VXLog(@"paso 4 obj=%p off=0x%zx n=%zu dict=%d", best, bestOff, bestSz, g_dict);
+            VXLog(@"paso 4 obj=%p off=0x%zx n=%d dict=%d nivel=%d", b, bOff, bN, bD, depth);
         }
 
         if (!g_listObj) return;
 
         g_L = 0; g_B = 0; g_P = 0; g_D = 0; g_boxN = 0;
 
-        size_t count = 0;
+        int count = 0;
         void *items = NULL;
         size_t stride = 8, base = 0x20;
+
         if (g_dict) {
-            if (!VXRead((char *)g_listObj + 0x20, &count, sizeof(count))) return;
+            count = VXInt(g_listObj, 0x20);
             items = VXAt(g_listObj, 0x18);
             stride = 0x18; base = 0x30;
         } else {
-            if (!VXRead((char *)g_listObj + 0x18, &count, sizeof(count))) return;
+            count = VXInt(g_listObj, 0x18);
             items = VXAt(g_listObj, 0x10);
+            int arrLen = items ? VXInt(items, 0x18) : 0;
+            if (arrLen > 0 && arrLen < count) count = arrLen;
         }
-        if (count == 0 || count > 200) return;
+
+        if (count <= 0 || count > 200) return;
         if (!VXOk(items)) return;
-        g_L = (int)count;
+        g_L = count;
         g_B = 1;
 
-        for (size_t i = 0; i < count && g_boxN < 120; i++) {
+        for (int i = 0; i < count && g_boxN < 120; i++) {
             void *pl = VXAt(items, base + i * stride);
             if (!VXOk(pl)) { g_D++; continue; }
 
-            void *args[1] = { NULL };
-            void *exc = NULL;
-            void *tf = NULL;
-            @try { tf = p_runtime_invoke(g_m_getTransform, pl, args, &exc); } @catch (...) { tf = NULL; }
-            if (!VXOk(tf)) { g_D++; continue; }
+            CGPoint head, toe;
+            if (!VXHeadToe(pl, &head, &toe)) { g_D++; continue; }
 
-            if (!g_m_getPosition) {
-                void *tk = VXAt(tf, 0);
-                if (VXOk(tk)) {
-                    void *k2 = tk;
-                    for (int j = 0; j < 8 && k2; j++) {
-                        g_m_getPosition = p_class_get_method_from_name(k2, "get_position", 0);
-                        if (g_m_getPosition) break;
-                        k2 = p_class_get_parent ? p_class_get_parent(k2) : NULL;
-                    }
-                    VXLog(@"pos resuelto=%p", g_m_getPosition);
-                }
-            }
-            if (!g_m_getPosition) { g_D++; continue; }
+            CGPoint ph, pt;
+            if (!VXProj(head, sz, &ph)) { g_D++; continue; }
+            if (!VXProj(toe, sz, &pt)) { g_D++; continue; }
 
-            float *pos = NULL;
-            void *exc2 = NULL;
-            @try { pos = (float *)p_runtime_invoke(g_m_getPosition, tf, args, &exc2); } @catch (...) { pos = NULL; }
-            if (!pos) { g_D++; continue; }
+            float h = fabsf(pt.y - ph.y);
+            if (h < 6 || h > sz.height) continue;
+            float w = h * 0.5f;
 
-            CGPoint feet = CGPointMake(pos[0], pos[1]);
-            CGPoint head = CGPointMake(pos[0], pos[1] + 1.75f);
+            float top = (ph.y < pt.y) ? ph.y : pt.y;
+            float left = ph.x - w / 2.0f;
 
-            CGPoint pf, ph;
-            if (!VXProj(g_cam, feet, sz, &pf)) { g_D++; continue; }
-            if (!VXProj(g_cam, head, sz, &ph)) { g_D++; continue; }
-            if (pf.y <= ph.y) { g_D++; continue; }
-
-            float h = pf.y - ph.y;
-            float w = h * 0.45f;
-            if (w < 4 || w > sz.width) continue;
-
-            g_box[g_boxN][0] = CGPointMake(pf.x - w / 2, pf.y);
-            g_box[g_boxN][1] = CGPointMake(pf.x + w / 2, pf.y);
-            g_box[g_boxN][2] = CGPointMake(ph.x + w / 2, ph.y);
-            g_box[g_boxN][3] = CGPointMake(ph.x - w / 2, ph.y);
+            g_box[g_boxN][0] = CGPointMake(left, top);
+            g_box[g_boxN][1] = CGPointMake(left + w, top);
+            g_box[g_boxN][2] = CGPointMake(left + w, top + h);
+            g_box[g_boxN][3] = CGPointMake(left, top + h);
             g_boxN++;
             g_P++;
         }
@@ -669,8 +663,8 @@ static VXMenu *g_menu = nil;
 
 - (void)estadoTap {
     NSString *msg = [NSString stringWithFormat:
-        @"L %d  B %d  P %d  D %d\noff 0x%zx  proj %d  mtx %d\nmatch %p\ncam %p",
-        g_L, g_B, g_P, g_D, g_listOff, g_projCount, g_mtxOk, g_match, g_cam];
+        @"L %d  B %d  P %d  D %d\noff 0x%zx  mtx %d\nmatch %p\ncam %p",
+        g_L, g_B, g_P, g_D, g_listOff, g_mtxOk, g_match, g_cam];
     UIAlertController *a = [UIAlertController alertControllerWithTitle:@"ESTADO" message:msg
                                                         preferredStyle:UIAlertControllerStyleAlert];
     [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
