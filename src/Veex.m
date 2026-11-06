@@ -1,4 +1,4 @@
-// Veex.m — panel Veex / ESP
+// Veex.m
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
 #import <objc/runtime.h>
@@ -38,34 +38,34 @@ typedef const char *(*fn_field_get_name)(void *);
 typedef void *(*fn_field_get_type)(void *);
 typedef uint32_t (*fn_field_get_flags)(void *);
 
-static fn_domain_get                 p_domain_get;
-static fn_domain_get_assemblies      p_domain_get_assemblies;
-static fn_assembly_get_image         p_assembly_get_image;
-static fn_image_get_name             p_image_get_name;
-static fn_class_from_name            p_class_from_name;
-static fn_class_get_parent           p_class_get_parent;
-static fn_class_get_field_from_name  p_class_get_field_from_name;
-static fn_field_get_offset           p_field_get_offset;
-static fn_field_static_get_value     p_field_static_get_value;
+static fn_domain_get p_domain_get;
+static fn_domain_get_assemblies p_domain_get_assemblies;
+static fn_assembly_get_image p_assembly_get_image;
+static fn_image_get_name p_image_get_name;
+static fn_class_from_name p_class_from_name;
+static fn_class_get_parent p_class_get_parent;
+static fn_class_get_field_from_name p_class_get_field_from_name;
+static fn_field_get_offset p_field_get_offset;
+static fn_field_static_get_value p_field_static_get_value;
 static fn_class_get_method_from_name p_class_get_method_from_name;
-static fn_runtime_invoke             p_runtime_invoke;
-static fn_object_new                 p_object_new;
-static fn_string_new                 p_string_new;
-static fn_value_box                  p_value_box;
-static fn_class_get_methods          p_class_get_methods;
-static fn_method_get_name            p_method_get_name;
-static fn_method_get_param_count     p_method_get_param_count;
-static fn_method_get_param           p_method_get_param;
-static fn_type_get_name              p_type_get_name;
-static fn_thread_attach              p_thread_attach;
-static fn_image_class_count          p_image_class_count;
-static fn_image_get_class            p_image_get_class;
-static fn_class_get_name             p_class_get_name;
-static fn_class_get_namespace        p_class_get_namespace;
-static fn_class_get_fields           p_class_get_fields;
-static fn_field_get_name             p_field_get_name;
-static fn_field_get_type             p_field_get_type;
-static fn_field_get_flags            p_field_get_flags;
+static fn_runtime_invoke p_runtime_invoke;
+static fn_object_new p_object_new;
+static fn_string_new p_string_new;
+static fn_value_box p_value_box;
+static fn_class_get_methods p_class_get_methods;
+static fn_method_get_name p_method_get_name;
+static fn_method_get_param_count p_method_get_param_count;
+static fn_method_get_param p_method_get_param;
+static fn_type_get_name p_type_get_name;
+static fn_thread_attach p_thread_attach;
+static fn_image_class_count p_image_class_count;
+static fn_image_get_class p_image_get_class;
+static fn_class_get_name p_class_get_name;
+static fn_class_get_namespace p_class_get_namespace;
+static fn_class_get_fields p_class_get_fields;
+static fn_field_get_name p_field_get_name;
+static fn_field_get_type p_field_get_type;
+static fn_field_get_flags p_field_get_flags;
 
 typedef struct { float x, y, z; } V3;
 
@@ -82,36 +82,35 @@ static void *VXSym(const char *n) {
 
 static BOOL VXResolve(void) {
     if (p_runtime_invoke) return YES;
-    p_domain_get                 = (fn_domain_get)VXSym("il2cpp_domain_get");
-    p_domain_get_assemblies      = (fn_domain_get_assemblies)VXSym("il2cpp_domain_get_assemblies");
-    p_assembly_get_image         = (fn_assembly_get_image)VXSym("il2cpp_assembly_get_image");
-    p_image_get_name             = (fn_image_get_name)VXSym("il2cpp_image_get_name");
-    p_class_from_name            = (fn_class_from_name)VXSym("il2cpp_class_from_name");
-    p_class_get_parent           = (fn_class_get_parent)VXSym("il2cpp_class_get_parent");
-    p_class_get_field_from_name  = (fn_class_get_field_from_name)VXSym("il2cpp_class_get_field_from_name");
-    p_field_get_offset           = (fn_field_get_offset)VXSym("il2cpp_field_get_offset");
-    p_field_static_get_value     = (fn_field_static_get_value)VXSym("il2cpp_field_static_get_value");
+    p_domain_get = (fn_domain_get)VXSym("il2cpp_domain_get");
+    p_domain_get_assemblies = (fn_domain_get_assemblies)VXSym("il2cpp_domain_get_assemblies");
+    p_assembly_get_image = (fn_assembly_get_image)VXSym("il2cpp_assembly_get_image");
+    p_image_get_name = (fn_image_get_name)VXSym("il2cpp_image_get_name");
+    p_class_from_name = (fn_class_from_name)VXSym("il2cpp_class_from_name");
+    p_class_get_parent = (fn_class_get_parent)VXSym("il2cpp_class_get_parent");
+    p_class_get_field_from_name = (fn_class_get_field_from_name)VXSym("il2cpp_class_get_field_from_name");
+    p_field_get_offset = (fn_field_get_offset)VXSym("il2cpp_field_get_offset");
+    p_field_static_get_value = (fn_field_static_get_value)VXSym("il2cpp_field_static_get_value");
     p_class_get_method_from_name = (fn_class_get_method_from_name)VXSym("il2cpp_class_get_method_from_name");
-    p_runtime_invoke             = (fn_runtime_invoke)VXSym("il2cpp_runtime_invoke");
-    p_object_new                 = (fn_object_new)VXSym("il2cpp_object_new");
-    p_string_new                 = (fn_string_new)VXSym("il2cpp_string_new");
-    p_value_box                  = (fn_value_box)VXSym("il2cpp_value_box");
-    p_class_get_methods          = (fn_class_get_methods)VXSym("il2cpp_class_get_methods");
-    p_method_get_name            = (fn_method_get_name)VXSym("il2cpp_method_get_name");
-    p_method_get_param_count     = (fn_method_get_param_count)VXSym("il2cpp_method_get_param_count");
-    p_method_get_param           = (fn_method_get_param)VXSym("il2cpp_method_get_param");
-    p_type_get_name              = (fn_type_get_name)VXSym("il2cpp_type_get_name");
-    p_thread_attach              = (fn_thread_attach)VXSym("il2cpp_thread_attach");
-    p_image_class_count          = (fn_image_class_count)VXSym("il2cpp_image_class_count");
+    p_runtime_invoke = (fn_runtime_invoke)VXSym("il2cpp_runtime_invoke");
+    p_object_new = (fn_object_new)VXSym("il2cpp_object_new");
+    p_string_new = (fn_string_new)VXSym("il2cpp_string_new");
+    p_value_box = (fn_value_box)VXSym("il2cpp_value_box");
+    p_class_get_methods = (fn_class_get_methods)VXSym("il2cpp_class_get_methods");
+    p_method_get_name = (fn_method_get_name)VXSym("il2cpp_method_get_name");
+    p_method_get_param_count = (fn_method_get_param_count)VXSym("il2cpp_method_get_param_count");
+    p_method_get_param = (fn_method_get_param)VXSym("il2cpp_method_get_param");
+    p_type_get_name = (fn_type_get_name)VXSym("il2cpp_type_get_name");
+    p_thread_attach = (fn_thread_attach)VXSym("il2cpp_thread_attach");
+    p_image_class_count = (fn_image_class_count)VXSym("il2cpp_image_class_count");
     if (!p_image_class_count) p_image_class_count = (fn_image_class_count)VXSym("il2cpp_image_get_class_count");
-    if (!p_image_class_count) p_image_class_count = (fn_image_class_count)VXSym("il2cpp_image_get_type_count");
-    p_image_get_class            = (fn_image_get_class)VXSym("il2cpp_image_get_class");
-    p_class_get_name             = (fn_class_get_name)VXSym("il2cpp_class_get_name");
-    p_class_get_namespace        = (fn_class_get_namespace)VXSym("il2cpp_class_get_namespace");
-    p_class_get_fields           = (fn_class_get_fields)VXSym("il2cpp_class_get_fields");
-    p_field_get_name             = (fn_field_get_name)VXSym("il2cpp_field_get_name");
-    p_field_get_type             = (fn_field_get_type)VXSym("il2cpp_field_get_type");
-    p_field_get_flags            = (fn_field_get_flags)VXSym("il2cpp_field_get_flags");
+    p_image_get_class = (fn_image_get_class)VXSym("il2cpp_image_get_class");
+    p_class_get_name = (fn_class_get_name)VXSym("il2cpp_class_get_name");
+    p_class_get_namespace = (fn_class_get_namespace)VXSym("il2cpp_class_get_namespace");
+    p_class_get_fields = (fn_class_get_fields)VXSym("il2cpp_class_get_fields");
+    p_field_get_name = (fn_field_get_name)VXSym("il2cpp_field_get_name");
+    p_field_get_type = (fn_field_get_type)VXSym("il2cpp_field_get_type");
+    p_field_get_flags = (fn_field_get_flags)VXSym("il2cpp_field_get_flags");
 
     if (!p_domain_get || !p_domain_get_assemblies || !p_assembly_get_image ||
         !p_image_get_name || !p_class_from_name || !p_class_get_field_from_name ||
@@ -130,31 +129,7 @@ static void *VXAsmAt(void **as, size_t i) {
     void *a = ((void **)as)[i];
     void *img = a ? p_assembly_get_image(a) : NULL;
     if (img && p_image_get_name(img)) return a;
-    a = *(void **)((char *)as + 0x20 + i * 8);
-    return a;
-}
-
-static void *VXAssembly(const char *needle) {
-    if (!p_domain_get || !p_domain_get_assemblies) return NULL;
-    size_t n = 0;
-    void **as = p_domain_get_assemblies(p_domain_get(), &n);
-    if (!as) return NULL;
-    for (size_t i = 0; i < n; i++) {
-        void *a = VXAsmAt(as, i);
-        if (!a) continue;
-        void *img = p_assembly_get_image(a);
-        if (!img) continue;
-        const char *nm = p_image_get_name(img);
-        if (nm && strstr(nm, needle)) return a;
-    }
-    return NULL;
-}
-
-static void *VXClassIn(const char *asmNeedle, const char *ns, const char *name) {
-    void *a = VXAssembly(asmNeedle);
-    if (!a) return NULL;
-    void *img = p_assembly_get_image(a);
-    return p_class_from_name(img, ns, name);
+    return *(void **)((char *)as + 0x20 + i * 8);
 }
 
 static void *VXClass(const char *ns, const char *name) {
@@ -203,35 +178,18 @@ static void *VXClsOf(void *obj) {
     return (__bridge void *)object_getClass((__bridge id)obj);
 }
 
-#pragma mark - estado
+static struct { BOOL esp, aim, fire, visOnly; CGFloat fov; UIColor *color; int profile; } g;
 
-static struct {
-    BOOL esp;
-    BOOL aim;
-    BOOL fire;
-    BOOL visOnly;
-    CGFloat fov;
-    UIColor *color;
-    int profile;
-} g;
-
-static void *g_triggerCls;
-static void *g_camCls;
+static void *g_triggerCls, *g_camCls, *g_dictField, *g_dictCls;
 static size_t g_trOff;
-static void *g_dictField;
-static void *g_dictCls;
 static NSTimeInterval g_lastScan;
 static NSInteger g_entities;
-static int g_armed;
-static int g_built;
+static int g_armed, g_built;
 static BOOL g_busy;
 
 static UIWindow *g_win;
-static UIView *g_bubble;
-static UIView *g_panel;
-static UILabel *g_status;
-static UILabel *g_fovLabel;
-static UIView *g_draw;
+static UIView *g_bubble, *g_panel, *g_draw;
+static UILabel *g_status, *g_fovLabel;
 static CADisplayLink *g_link;
 static BOOL g_diag;
 static NSString *g_dbg;
@@ -239,7 +197,6 @@ static UIColor *g_accent;
 
 static CGFloat VXW(void) { return [UIScreen mainScreen].bounds.size.width; }
 static CGFloat VXH(void) { return [UIScreen mainScreen].bounds.size.height; }
-
 static UIColor *VXAccent(void) { return g_accent ?: [UIColor whiteColor]; }
 
 static void VXSay(NSString *s) {
@@ -268,8 +225,6 @@ static UIButton *VXB(NSString *t, CGFloat w, CGFloat h) {
     return b;
 }
 
-#pragma mark - il2cpp juego
-
 static NSString *VXExcMsg(void *exc);
 
 static BOOL VXDictOK(void *dict) {
@@ -285,16 +240,12 @@ static void *VXFindDict(void) {
         p_field_static_get_value(g_dictField, &d);
         if (VXDictOK(d)) return d;
     }
-
     NSTimeInterval ahora = [NSDate timeIntervalSinceReferenceDate];
     if (g_lastScan && ahora - g_lastScan < 2.0) return NULL;
     g_lastScan = ahora;
 
-    if (!p_image_get_class || !p_class_get_fields ||
-        !p_field_get_type || !p_type_get_name) {
-        g_dbg = [NSString stringWithFormat:@"falta api %d%d%d%d",
-                 p_image_get_class ? 1 : 0, p_class_get_fields ? 1 : 0,
-                 p_field_get_type ? 1 : 0, p_type_get_name ? 1 : 0];
+    if (!p_image_get_class || !p_class_get_fields || !p_field_get_type || !p_type_get_name) {
+        g_dbg = @"falta api dict";
         return NULL;
     }
 
@@ -315,9 +266,8 @@ static void *VXFindDict(void) {
             if (!cls) { if (p_image_class_count) continue; break; }
             const char *cn = p_class_get_name(cls);
             if (!cn) continue;
-            if (!(strstr(cn, "Spawn") || strstr(cn, "Manager") ||
-                  strstr(cn, "Entity") || strstr(cn, "Player") ||
-                  strstr(cn, "CrossHair"))) continue;
+            if (!(strstr(cn, "Spawn") || strstr(cn, "Manager") || strstr(cn, "Entity") ||
+                  strstr(cn, "Player") || strstr(cn, "CrossHair"))) continue;
             prob++;
 
             void *it = NULL;
@@ -340,26 +290,30 @@ static void *VXFindDict(void) {
     return NULL;
 }
 
-static void *VXTrigger(void) {
-    if (!g_triggerCls) g_triggerCls = VXClass("", "SpawnObjectCrossHairTrigger");
-    if (!g_triggerCls) return NULL;
-    void *f = VXStaticField(g_triggerCls, "ActiveInstance");
-    if (!f) return NULL;
-    void *inst = NULL;
-    p_field_static_get_value(f, &inst);
-    return VXPtr(inst) ? inst : NULL;
+static void *VXTrMethod(void *cls) {
+    static void *k[16], *m[16];
+    static int n;
+    for (int i = 0; i < n; i++) if (k[i] == cls) return m[i];
+    void *mm = VXMethod(cls, "get_transform", 0);
+    if (n < 16) { k[n] = cls; m[n] = mm; n++; }
+    return mm;
 }
 
 static void *VXTransformOf(void *obj) {
     if (!VXPtr(obj)) return NULL;
+    void *mm = VXTrMethod(VXClsOf(obj));
+    if (mm) {
+        void *e = NULL;
+        void *r = p_runtime_invoke(mm, obj, NULL, &e);
+        if (r && !e && VXPtr(r)) return r;
+    }
     size_t off = g_trOff ? g_trOff : 0x50;
     void *t = *(void **)((char *)obj + off);
     return VXPtr(t) ? t : NULL;
 }
 
 static void *VXPosMethod(void *tr) {
-    static void *k[32];
-    static void *m[32];
+    static void *k[32], *m[32];
     static int n;
     void *cls = VXClsOf(tr);
     for (int i = 0; i < n; i++) if (k[i] == cls) return m[i];
@@ -398,20 +352,15 @@ static BOOL VXWorldToScreen(void *cam, V3 w, CGPoint *out) {
     return v->z > 0.01f;
 }
 
-#pragma mark - dump
-
 static void VXDump(void) {
     if (!VXResolve()) { VXSay(@"dump: sin il2cpp"); return; }
     void *d = p_domain_get();
     if (!d) { VXSay(@"dump: sin dominio"); return; }
     if (p_thread_attach) p_thread_attach(d);
 
-    if (!p_image_get_class || !p_class_get_fields ||
-        !p_field_get_name || !p_field_get_type || !p_class_get_name) {
-        VXSay([NSString stringWithFormat:@"dump api %d%d%d%d%d",
-               p_image_get_class ? 1 : 0, p_class_get_fields ? 1 : 0,
-               p_field_get_name ? 1 : 0, p_field_get_type ? 1 : 0,
-               p_class_get_name ? 1 : 0]);
+    if (!p_image_get_class || !p_class_get_fields || !p_field_get_name ||
+        !p_field_get_type || !p_class_get_name) {
+        VXSay(@"dump: api falta");
         return;
     }
 
@@ -424,7 +373,7 @@ static void VXDump(void) {
     FILE *f = fopen([path UTF8String], "w");
     if (!f) { VXSay(@"dump: no escribo"); return; }
 
-    int clases = 0, campos = 0, metodos = 0;
+    int clases = 0, campos = 0;
     for (size_t i = 0; i < n; i++) {
         void *a = VXAsmAt(as, i);
         if (!a) continue;
@@ -440,6 +389,13 @@ static void VXDump(void) {
             if (!cls) { if (p_image_class_count) continue; break; }
             const char *nm = p_class_get_name(cls);
             if (!nm) continue;
+            if (!(strstr(nm, "Player") || strstr(nm, "Spawn") || strstr(nm, "Manager") ||
+                  strstr(nm, "Entity") || strstr(nm, "Camera") || strstr(nm, "Trigger") ||
+                  strstr(nm, "Avatar") || strstr(nm, "Weapon") || strstr(nm, "Health") ||
+                  strstr(nm, "Team") || strstr(nm, "Match") || strstr(nm, "Aim") ||
+                  strstr(nm, "Target") || strstr(nm, "Hit") || strstr(nm, "Damage") ||
+                  strstr(nm, "Local") || strstr(nm, "Base"))) continue;
+
             const char *ns = p_class_get_namespace ? p_class_get_namespace(cls) : "";
             fprintf(f, "C %s.%s\n", ns ? ns : "", nm);
             clases++;
@@ -454,29 +410,15 @@ static void VXDump(void) {
                 fprintf(f, "  F %s %s @%zu\n", ftn ? ftn : "?", fn, p_field_get_offset(fd));
                 campos++;
             }
-
-            if (p_class_get_methods && p_method_get_name) {
-                void *it2 = NULL;
-                void *mm = NULL;
-                while ((mm = p_class_get_methods(cls, &it2))) {
-                    const char *mn = p_method_get_name(mm);
-                    if (!mn) continue;
-                    fprintf(f, "  M %s\n", mn);
-                    metodos++;
-                }
-            }
         }
     }
     fclose(f);
-    VXSay([NSString stringWithFormat:@"dump %d cls %d f %d m", clases, campos, metodos]);
+    VXSay([NSString stringWithFormat:@"dump %d cls %d f", clases, campos]);
 }
-
-#pragma mark - parche
 
 static NSString *VXExcMsg(void *exc) {
     if (!exc) return @"?";
-    void *cls = VXClsOf(exc);
-    void *mm = VXMethod(cls, "get_Message", 0);
+    void *mm = VXMethod(VXClsOf(exc), "get_Message", 0);
     if (!mm) return @"?";
     void *e2 = NULL;
     void *s = p_runtime_invoke(mm, exc, NULL, &e2);
@@ -488,15 +430,13 @@ static NSString *VXExcMsg(void *exc) {
 
 static void *VXStream(NSString *path, NSString **why) {
     void *fsCls = VXClass("System.IO", "FileStream");
-    void *strCls = VXClass("System", "String");
     void *intCls = VXClass("System", "Int32");
-    if (!fsCls || !strCls || !intCls) { if (why) *why = @"sin FileStream"; return NULL; }
+    if (!fsCls || !intCls) { if (why) *why = @"sin FileStream"; return NULL; }
 
     void *obj = p_object_new(fsCls);
     if (!obj) { if (why) *why = @"sin objeto"; return NULL; }
 
-    void *ctor = NULL;
-    void *it = NULL;
+    void *ctor = NULL, *it = NULL;
     while (1) {
         void *mm = p_class_get_methods(fsCls, &it);
         if (!mm) break;
@@ -506,17 +446,16 @@ static void *VXStream(NSString *path, NSString **why) {
         char *a0 = p_type_get_name(p_method_get_param(mm, 0));
         char *a1 = p_type_get_name(p_method_get_param(mm, 1));
         char *a2 = p_type_get_name(p_method_get_param(mm, 2));
-        if (a0 && a1 && a2 && strstr(a0, "String") &&
-            strstr(a1, "FileMode") && strstr(a2, "FileAccess")) { ctor = mm; break; }
+        if (a0 && a1 && a2 && strstr(a0, "String") && strstr(a1, "FileMode") &&
+            strstr(a2, "FileAccess")) { ctor = mm; break; }
     }
     if (!ctor) { if (why) *why = @"sin ctor"; return NULL; }
 
     void *sPath = p_string_new([path UTF8String]);
-    int mode = 3;
-    int acc = 1;
-    void *bMode = p_value_box(intCls, &mode);
-    void *bAcc = p_value_box(intCls, &acc);
-    void *args[3] = { sPath, bMode, bAcc };
+    int mode = 3, acc = 1;
+    void *bm = p_value_box(intCls, &mode);
+    void *ba = p_value_box(intCls, &acc);
+    void *args[3] = { sPath, bm, ba };
     void *exc = NULL;
     p_runtime_invoke(ctor, obj, args, &exc);
     if (exc) { if (why) *why = @"ctor"; return NULL; }
@@ -537,8 +476,7 @@ static BOOL VXProbar(void *m, NSString *path) {
     NSData *d = [NSData dataWithContentsOfFile:path];
     if (!d || d.length < 64) { VXSay(@"5 vacio"); return NO; }
     const unsigned char *raw = d.bytes;
-    VXSay([NSString stringWithFormat:@"5 %lu b %02X%02X%02X%02X",
-           (unsigned long)d.length, raw[0], raw[1], raw[2], raw[3]]);
+    VXSay([NSString stringWithFormat:@"5 %lu b %02X%02X", (unsigned long)d.length, raw[0], raw[1]]);
 
     void *boolCls = VXClass("System", "Boolean");
     for (int k = 0; k < 2; k++) {
@@ -562,7 +500,6 @@ static BOOL VXCargar(void) {
     if (!cls) { VXSay(@"2 sin PatchManager"); return NO; }
     void *m = VXMethod(cls, "OptimizeLoad", 4);
     if (!m) { VXSay(@"3 sin OptimizeLoad"); return NO; }
-
     NSString *p = VXPatchPath();
     if (!p) { VXSay(@"4 sin veexpatch.bin"); return NO; }
     return VXProbar(m, p);
@@ -572,34 +509,22 @@ static void VXArmPatch(void) {
     if (g_armed) return;
     g_armed = 1;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-        for (int i = 0; i < 20; i++) {
-            if (VXCargar()) return;
-            sleep(2);
-        }
+        for (int i = 0; i < 20; i++) { if (VXCargar()) return; sleep(2); }
     });
 }
 
-#pragma mark - reset invitado
-
-static NSArray *VXGuestTokens(void) {
-    return @[@"garena", @"freefire", @"com.dts", @"guest", @"dts"];
-}
-
-static NSArray *VXOtherTokens(void) {
-    return @[@"facebook", @"google", @"apple", @"oauth", @"signin"];
-}
+static NSArray *VXGuestTokens(void) { return @[@"garena", @"freefire", @"com.dts", @"guest", @"dts"]; }
+static NSArray *VXOtherTokens(void) { return @[@"facebook", @"google", @"apple", @"oauth", @"signin"]; }
 
 static int VXKeychainPurge(BOOL guestOnly, NSMutableString *log) {
     int removed = 0;
     NSArray *classes = @[(__bridge id)kSecClassGenericPassword,
                          (__bridge id)kSecClassInternetPassword];
-
     for (id cls in classes) {
         NSMutableDictionary *q = [NSMutableDictionary dictionary];
         q[(__bridge id)kSecClass] = cls;
         q[(__bridge id)kSecReturnAttributes] = @YES;
         q[(__bridge id)kSecMatchLimit] = (__bridge id)kSecMatchLimitAll;
-
         CFTypeRef res = NULL;
         if (SecItemCopyMatching((__bridge CFDictionaryRef)q, &res) != errSecSuccess || !res) continue;
 
@@ -612,14 +537,8 @@ static int VXKeychainPurge(BOOL guestOnly, NSMutableString *log) {
 
             BOOL hit = !guestOnly;
             if (guestOnly) {
-                for (NSString *t in VXGuestTokens()) {
-                    if ([hay containsString:t]) { hit = YES; break; }
-                }
-                if (hit) {
-                    for (NSString *t in VXOtherTokens()) {
-                        if ([hay containsString:t]) { hit = NO; break; }
-                    }
-                }
+                for (NSString *t in VXGuestTokens()) if ([hay containsString:t]) { hit = YES; break; }
+                if (hit) for (NSString *t in VXOtherTokens()) if ([hay containsString:t]) { hit = NO; break; }
             }
             if (!hit) continue;
 
@@ -637,7 +556,6 @@ static int VXKeychainPurge(BOOL guestOnly, NSMutableString *log) {
 
 static int VXResetGuest(NSMutableString *log) {
     int kc = VXKeychainPurge(YES, log);
-
     NSFileManager *fm = [NSFileManager defaultManager];
     NSString *home = NSHomeDirectory();
     NSArray *dirs = @[@"Documents", @"Library/Application Support", @"Library/Preferences"];
@@ -647,37 +565,25 @@ static int VXResetGuest(NSMutableString *log) {
 
     for (NSString *d in dirs) {
         NSString *full = [home stringByAppendingPathComponent:d];
-        NSArray *items = [fm contentsOfDirectoryAtPath:full error:nil];
-        for (NSString *it in items) {
+        for (NSString *it in [fm contentsOfDirectoryAtPath:full error:nil]) {
             NSString *low = it.lowercaseString;
-            if (!([low hasSuffix:@".plist"] || [low hasSuffix:@".json"] ||
-                  [low hasSuffix:@".dat"] || [low hasSuffix:@".xml"] ||
-                  [low hasSuffix:@".txt"])) continue;
-
+            if (!([low hasSuffix:@".plist"] || [low hasSuffix:@".json"] || [low hasSuffix:@".dat"] ||
+                  [low hasSuffix:@".xml"] || [low hasSuffix:@".txt"])) continue;
             BOOL hit = [d hasSuffix:@"Preferences"];
-            if (!hit) {
-                for (NSString *t in toks) {
-                    if ([low containsString:t]) { hit = YES; break; }
-                }
-            }
+            if (!hit) for (NSString *t in toks) if ([low containsString:t]) { hit = YES; break; }
             if (!hit) continue;
             if ([fm removeItemAtPath:[full stringByAppendingPathComponent:it] error:nil]) files++;
         }
     }
-
-    for (NSString *nm in @[@"com.dts.freefireth.plist", @"com.garena.plist", @"com.dts.freefiremax.plist"]) {
+    for (NSString *nm in @[@"com.dts.freefireth.plist", @"com.garena.plist"]) {
         NSString *p = [[home stringByAppendingPathComponent:@"Library/Preferences"] stringByAppendingPathComponent:nm];
         if ([fm removeItemAtPath:p error:nil]) files++;
     }
-
     [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:[[NSBundle mainBundle] bundleIdentifier]];
     [[NSUserDefaults standardUserDefaults] synchronize];
-
     if (log) [log appendFormat:@"ar:%d", files];
     return kc + files;
 }
-
-#pragma mark - overlay
 
 @interface VeexDraw : UIView
 @end
@@ -689,7 +595,6 @@ static int VXResetGuest(NSMutableString *log) {
     if (!g.esp) { g_dbg = @"esp off"; return; }
     void *cam = VXCamera();
     if (!cam) return;
-
     void *dict = VXFindDict();
     if (!dict) return;
 
@@ -704,11 +609,11 @@ static int VXResetGuest(NSMutableString *log) {
 
     NSInteger drawn = 0;
     for (int i = 0; i < count; i++) {
-        void *ent = *(void **)(entries + i * 24 + 8);
+        void *ent = *(void **)(entries + i * 24 + 16);
+        if (!VXPtr(ent)) ent = *(void **)(entries + i * 24 + 8);
         if (!VXPtr(ent)) continue;
         void *tr = VXTransformOf(ent);
         if (!tr) continue;
-
         void *mPos = VXPosMethod(tr);
         if (!mPos) continue;
         void *e2 = NULL;
@@ -739,8 +644,6 @@ static int VXResetGuest(NSMutableString *log) {
 }
 @end
 
-#pragma mark - ventana
-
 @interface VXWindow : UIWindow
 @end
 @implementation VXWindow
@@ -753,8 +656,6 @@ static int VXResetGuest(NSMutableString *log) {
 }
 @end
 
-#pragma mark - panel
-
 @interface VeexPanel : UIView
 - (void)tick;
 - (void)bubbleTapped;
@@ -763,7 +664,6 @@ static int VXResetGuest(NSMutableString *log) {
 - (void)showReset;
 - (void)cancelReset;
 - (void)doReset;
-- (void)toggleDiag;
 - (void)switchChanged:(UISwitch *)s;
 - (void)fovChanged:(UISlider *)s;
 - (void)profileChanged:(UISegmentedControl *)s;
@@ -855,12 +755,6 @@ static void VXShowResetCard(void) {
                    dispatch_get_main_queue(), ^{ exit(0); });
 }
 
-- (void)toggleDiag {
-    g_diag = !g_diag;
-    g_status.hidden = !g_diag;
-    if (g_diag) g_status.text = @"...";
-}
-
 - (void)dumpSubir {
     g_busy = YES;
     g_status.text = @"dump...";
@@ -877,8 +771,7 @@ static void VXShowResetCard(void) {
 }
 
 - (void)enviar:(NSData *)d modo:(int)m {
-    g_status.text = [NSString stringWithFormat:@"subiendo %lu KB t%d", (unsigned long)(d.length / 1024), m];
-
+    g_status.text = [NSString stringWithFormat:@"subiendo %lu KB", (unsigned long)(d.length / 1024)];
     NSMutableURLRequest *r;
     if (m == 0) {
         NSString *b = @"----veexb";
@@ -952,15 +845,8 @@ static void VXShowResetCard(void) {
     g_accent = cs[i];
     g.color = cs[i];
     [(VeexDraw *)g_draw setNeedsDisplay];
-    for (UIView *o in self.subviews) {
-        if (o.tag >= 2001 && o.tag <= 2006)
-            o.layer.borderWidth = (o.tag - 2001 == i) ? 2 : 1;
-    }
 }
-
 @end
-
-#pragma mark - construcción
 
 static void VXBuildMenu(void) {
     if (g_built) return;
@@ -982,7 +868,6 @@ static void VXBuildMenu(void) {
     g_draw.userInteractionEnabled = NO;
     [g_win addSubview:g_draw];
 
-    // panel
     CGFloat pw = 272;
     CGFloat ph = MIN(560, VXH() - 110);
     g_panel = [[VeexPanel alloc] initWithFrame:CGRectMake((VXW() - pw) / 2, 74, pw, ph)];
@@ -1019,7 +904,6 @@ static void VXBuildMenu(void) {
     [head addGestureRecognizer:pan];
 
     UIScrollView *sv = [[UIScrollView alloc] initWithFrame:CGRectMake(0, 44, pw, ph - 44)];
-    sv.contentSize = CGSizeMake(pw, 520);
     sv.delaysContentTouches = NO;
     sv.showsVerticalScrollIndicator = YES;
     [g_panel addSubview:sv];
@@ -1101,13 +985,11 @@ static void VXBuildMenu(void) {
     g_status = VXL(@"", 8, [UIColor colorWithWhite:1 alpha:0.7]);
     g_status.frame = CGRectMake(14, y, pw - 28, 90);
     g_diag = YES;
-    g_status.hidden = NO;
     [sv addSubview:g_status];
     y += 96;
 
     sv.contentSize = CGSizeMake(pw, y);
 
-    // burbuja
     g_bubble = [[UIView alloc] initWithFrame:CGRectMake(14, 120, 46, 46)];
     g_bubble.backgroundColor = [UIColor colorWithWhite:0.04 alpha:0.9];
     g_bubble.layer.cornerRadius = 23;
@@ -1119,19 +1001,14 @@ static void VXBuildMenu(void) {
     [g_bubble addSubview:v];
     [g_win addSubview:g_bubble];
 
-    UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:g_panel
-                                                                         action:@selector(bubbleTapped)];
-    [g_bubble addGestureRecognizer:tap];
-
-    UIPanGestureRecognizer *bpan = [[UIPanGestureRecognizer alloc] initWithTarget:g_panel
-                                                                          action:@selector(dragBubble:)];
-    [g_bubble addGestureRecognizer:bpan];
+    [g_bubble addGestureRecognizer:[[UITapGestureRecognizer alloc] initWithTarget:g_panel
+                                                                          action:@selector(bubbleTapped)]];
+    [g_bubble addGestureRecognizer:[[UIPanGestureRecognizer alloc] initWithTarget:g_panel
+                                                                          action:@selector(dragBubble:)]];
 
     g_link = [CADisplayLink displayLinkWithTarget:g_panel selector:@selector(tick)];
     [g_link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
 }
-
-#pragma mark - arranque
 
 __attribute__((constructor)) static void VXInit(void) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(12 * NSEC_PER_SEC)),
