@@ -28,6 +28,14 @@ typedef const char *(*fn_method_get_name)(void *);
 typedef uint32_t (*fn_method_get_param_count)(void *);
 typedef void *(*fn_method_get_param)(void *, uint32_t);
 typedef char *(*fn_type_get_name)(void *);
+typedef void *(*fn_thread_attach)(void *);
+typedef uint32_t (*fn_image_class_count)(void *);
+typedef void *(*fn_image_get_class)(void *, uint32_t);
+typedef const char *(*fn_class_get_name)(void *);
+typedef const char *(*fn_class_get_namespace)(void *);
+typedef void *(*fn_class_get_fields)(void *, void **);
+typedef const char *(*fn_field_get_name)(void *);
+typedef void *(*fn_field_get_type)(void *);
 
 static fn_domain_get                 p_domain_get;
 static fn_domain_get_assemblies      p_domain_get_assemblies;
@@ -48,6 +56,14 @@ static fn_method_get_name            p_method_get_name;
 static fn_method_get_param_count     p_method_get_param_count;
 static fn_method_get_param           p_method_get_param;
 static fn_type_get_name              p_type_get_name;
+static fn_thread_attach              p_thread_attach;
+static fn_image_class_count          p_image_class_count;
+static fn_image_get_class            p_image_get_class;
+static fn_class_get_name             p_class_get_name;
+static fn_class_get_namespace        p_class_get_namespace;
+static fn_class_get_fields           p_class_get_fields;
+static fn_field_get_name             p_field_get_name;
+static fn_field_get_type             p_field_get_type;
 
 typedef struct { float x, y, z; } V3;
 
@@ -83,6 +99,14 @@ static BOOL VXResolve(void) {
     p_method_get_param_count     = (fn_method_get_param_count)VXSym("il2cpp_method_get_param_count");
     p_method_get_param           = (fn_method_get_param)VXSym("il2cpp_method_get_param");
     p_type_get_name              = (fn_type_get_name)VXSym("il2cpp_type_get_name");
+    p_thread_attach              = (fn_thread_attach)VXSym("il2cpp_thread_attach");
+    p_image_class_count          = (fn_image_class_count)VXSym("il2cpp_image_class_count");
+    p_image_get_class            = (fn_image_get_class)VXSym("il2cpp_image_get_class");
+    p_class_get_name             = (fn_class_get_name)VXSym("il2cpp_class_get_name");
+    p_class_get_namespace        = (fn_class_get_namespace)VXSym("il2cpp_class_get_namespace");
+    p_class_get_fields           = (fn_class_get_fields)VXSym("il2cpp_class_get_fields");
+    p_field_get_name             = (fn_field_get_name)VXSym("il2cpp_field_get_name");
+    p_field_get_type             = (fn_field_get_type)VXSym("il2cpp_field_get_type");
 
     if (!p_domain_get || !p_domain_get_assemblies || !p_assembly_get_image ||
         !p_image_get_name || !p_class_from_name || !p_class_get_field_from_name ||
@@ -103,7 +127,7 @@ static void *VXAssembly(const char *needle) {
     void **as = p_domain_get_assemblies(p_domain_get(), &n);
     if (!as) return NULL;
     for (size_t i = 0; i < n; i++) {
-        void *a = *(void **)((char *)as + 0x20 + i * 8);
+        void *a = ((void **)as)[i];
         if (!a) continue;
         void *img = p_assembly_get_image(a);
         if (!img) continue;
@@ -126,7 +150,7 @@ static void *VXClass(const char *ns, const char *name) {
     void **as = p_domain_get_assemblies(p_domain_get(), &n);
     if (!as) return NULL;
     for (size_t i = 0; i < n; i++) {
-        void *a = *(void **)((char *)as + 0x20 + i * 8);
+        void *a = ((void **)as)[i];
         if (!a) continue;
         void *img = p_assembly_get_image(a);
         if (!img) continue;
@@ -258,7 +282,10 @@ static void *VXPosMethod(void *tr) {
 }
 
 static void *VXCamera(void) {
-    if (!g_camCls) g_camCls = VXClass("UnityEngine", "Camera");
+    if (!g_camCls) {
+        g_camCls = VXClass("UnityEngine", "Camera");
+        if (!g_camCls) g_camCls = VXClass("", "Camera");
+    }
     if (!g_camCls) { g_dbg = @"sin clase cam"; return NULL; }
     void *mm = VXMethod(g_camCls, "get_main", 0);
     if (!mm) { g_dbg = @"sin get_main"; return NULL; }
@@ -282,6 +309,71 @@ static BOOL VXWorldToScreen(void *cam, V3 w, CGPoint *out) {
     out->x = v->x;
     out->y = VXH() - v->y;
     return v->z > 0.01f;
+}
+
+#pragma mark - dump
+
+static void VXDump(void) {
+    if (!VXResolve()) { VXSay(@"dump: sin il2cpp"); return; }
+    void *d = p_domain_get();
+    if (!d) { VXSay(@"dump: sin dominio"); return; }
+    if (p_thread_attach) p_thread_attach(d);
+
+    size_t n = 0;
+    void **as = p_domain_get_assemblies(d, &n);
+    if (!as) { VXSay(@"dump: sin ensamblados"); return; }
+
+    NSString *path = [[NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject]
+                      stringByAppendingPathComponent:@"veexdump.txt"];
+    FILE *f = fopen([path UTF8String], "w");
+    if (!f) { VXSay(@"dump: no escribo"); return; }
+
+    int clases = 0, campos = 0, metodos = 0;
+    for (size_t i = 0; i < n; i++) {
+        void *a = ((void **)as)[i];
+        if (!a) continue;
+        void *img = p_assembly_get_image(a);
+        if (!img) continue;
+        const char *inm = p_image_get_name(img);
+        fprintf(f, "\n=== %s ===\n", inm ? inm : "?");
+
+        size_t cc = p_image_class_count(img);
+        for (size_t c = 0; c < cc; c++) {
+            void *cls = p_image_get_class(img, (uint32_t)c);
+            if (!cls) continue;
+            const char *nm = p_class_get_name(cls);
+            const char *ns = p_class_get_namespace(cls);
+            fprintf(f, "C %s.%s\n", ns ? ns : "", nm ? nm : "?");
+            clases++;
+
+            void *it = NULL;
+            void *fd = NULL;
+            while ((fd = p_class_get_fields(cls, &it))) {
+                const char *fn = p_field_get_name(fd);
+                void *ft = p_field_get_type(fd);
+                char *ftn = ft ? p_type_get_name(ft) : NULL;
+                fprintf(f, "  F %s %s @%zu\n", ftn ? ftn : "?", fn ? fn : "?", p_field_get_offset(fd));
+                campos++;
+            }
+
+            void *it2 = NULL;
+            void *mm = NULL;
+            while ((mm = p_class_get_methods(cls, &it2))) {
+                const char *mn = p_method_get_name(mm);
+                fprintf(f, "  M %s(", mn ? mn : "?");
+                uint32_t pc = p_method_get_param_count(mm);
+                for (uint32_t k = 0; k < pc; k++) {
+                    void *pt = p_method_get_param(mm, k);
+                    char *ptn = pt ? p_type_get_name(pt) : NULL;
+                    fprintf(f, "%s%s", k ? "," : "", ptn ? ptn : "?");
+                }
+                fprintf(f, ")\n");
+                metodos++;
+            }
+        }
+    }
+    fclose(f);
+    VXSay([NSString stringWithFormat:@"dump %d cls %d f %d m", clases, campos, metodos]);
 }
 
 #pragma mark - parche
@@ -583,6 +675,8 @@ static int VXResetGuest(NSMutableString *log) {
 - (void)fovChanged:(UISlider *)s;
 - (void)profileChanged:(UISegmentedControl *)s;
 - (void)chip:(UIButton *)b;
+- (void)dumpSubir;
+- (void)subir;
 - (void)close;
 @end
 
@@ -672,6 +766,41 @@ static void VXShowResetCard(void) {
     g_diag = !g_diag;
     g_status.hidden = !g_diag;
     if (g_diag) g_status.text = @"...";
+}
+
+- (void)dumpSubir {
+    g_status.text = @"dump...";
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        VXDump();
+        dispatch_async(dispatch_get_main_queue(), ^{ [self subir]; });
+    });
+}
+
+- (void)subir {
+    NSString *p = [[NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject]
+                   stringByAppendingPathComponent:@"veexdump.txt"];
+    NSData *d = [NSData dataWithContentsOfFile:p];
+    if (!d.length) { g_status.text = @"sin dump"; return; }
+
+    g_status.text = [NSString stringWithFormat:@"subiendo %lu KB", (unsigned long)(d.length / 1024)];
+    NSMutableURLRequest *r = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://paste.rs"]];
+    r.HTTPMethod = @"POST";
+    r.HTTPBody = d;
+    r.timeoutInterval = 180;
+    [r setValue:@"text/plain" forHTTPHeaderField:@"Content-Type"];
+
+    [[[NSURLSession sharedSession] dataTaskWithRequest:r
+        completionHandler:^(NSData *rd, NSURLResponse *rs, NSError *e) {
+            NSString *s = rd ? [[NSString alloc] initWithData:rd encoding:NSUTF8StringEncoding] : nil;
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (s.length && [s hasPrefix:@"http"]) {
+                    g_status.text = s;
+                    UIPasteboard.generalPasteboard.string = s;
+                } else {
+                    g_status.text = e ? e.localizedDescription : @"subida fallo";
+                }
+            });
+        }] resume];
 }
 
 - (void)switchChanged:(UISwitch *)s {
@@ -847,6 +976,12 @@ static void VXBuildMenu(void) {
     rst.layer.borderColor = VXAccent().CGColor;
     [rst addTarget:g_panel action:@selector(showReset) forControlEvents:UIControlEventTouchUpInside];
     [sv addSubview:rst];
+    y += 44;
+
+    UIButton *dmp = VXB(@"DUMP Y SUBIR", pw - 28, 32);
+    dmp.frame = CGRectMake(14, y, pw - 28, 32);
+    [dmp addTarget:g_panel action:@selector(dumpSubir) forControlEvents:UIControlEventTouchUpInside];
+    [sv addSubview:dmp];
     y += 44;
 
     g_status = VXL(@"", 8, [UIColor colorWithWhite:1 alpha:0.7]);
