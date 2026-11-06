@@ -53,6 +53,14 @@ static BOOL VXOk(void *p){
     return (v > 0x10000) && ((v & 7) == 0);
 }
 
+static BOOL VXName(void *pl){
+    if (!VXOk(pl)) return NO;
+    void *s = VXAt(pl, 0x498);
+    if (!VXOk(s)) return NO;
+    int len = VXInt(s, 0x10);
+    return (len > 0 && len < 48);
+}
+
 #pragma mark - il2cpp
 
 static void *(*p_domain_get)(void);
@@ -196,48 +204,56 @@ static const int kNodes[] = {
 };
 static const int kNodeCount = 19;
 
-static BOOL VXHeadToe(void *pl, CGPoint *head, CGPoint *toe){
-    float hi = -1e9f, lo = 1e9f;
-    CGPoint ph = {0,0}, pt = {0,0};
-    BOOL hasH = NO, hasT = NO;
+static BOOL VXHead(void *pl, CGPoint *head){
+    float hi = -1e9f;
+    CGPoint ph = {0,0};
+    BOOL has = NO;
+    int valid = 0;
     for (int i = 0; i < kNodeCount; i++) {
         void *node = VXAt(pl, kNodes[i]);
         if (!VXOk(node)) continue;
         CGPoint p;
         if (!VXPos(node, &p)) continue;
         if (fabsf(p.x) > 20000.0f || fabsf(p.y) > 20000.0f) continue;
-        if (p.y > hi) { hi = p.y; ph = p; hasH = YES; }
-        if (p.y < lo) { lo = p.y; pt = p; hasT = YES; }
+        valid++;
+        if (p.y > hi) { hi = p.y; ph = p; has = YES; }
     }
-    if (!hasH || !hasT) return NO;
+    if (!has || valid < 3) return NO;
     *head = ph;
-    *toe = pt;
     return YES;
 }
 
 #pragma mark - barrido de contenedor
 
 static BOOL VXScanOne(void *obj, void **oObj, size_t *oOff, int *oN, BOOL *oDict){
-    BOOL found = NO; int best = 0;
+    BOOL found = NO; int bestScore = 0;
     for (size_t off = 0x80; off <= 0x400; off += 8) {
         void *l = VXAt(obj, off);
         if (!VXOk(l)) continue;
 
         void *it = VXAt(l, 0x10);
-        if (VXOk(it)) {
-            void *f0 = VXAt(it, 0x20);
-            int s = VXInt(l, 0x18);
-            if (VXOk(f0) && s > 0 && s < 300 && s > best) {
-                *oObj = l; *oOff = off; *oN = s; *oDict = NO; best = s; found = YES;
+        int s = VXInt(l, 0x18);
+        if (VXOk(it) && s > 1 && s < 300) {
+            int score = 0;
+            for (int k = 0; k < 8 && k < s; k++) {
+                void *e = VXAt(it, 0x20 + k * 8);
+                if (VXName(e)) score++;
+            }
+            if (score >= 2 && score > bestScore) {
+                *oObj = l; *oOff = off; *oN = s; *oDict = NO; bestScore = score; found = YES;
             }
         }
 
         void *ent = VXAt(l, 0x18);
-        if (VXOk(ent)) {
-            int c = VXInt(l, 0x20);
-            void *v0 = VXAt(ent, 0x30);
-            if (VXOk(v0) && c > 0 && c < 300 && c > best) {
-                *oObj = l; *oOff = off; *oN = c; *oDict = YES; best = c; found = YES;
+        int c = VXInt(l, 0x20);
+        if (VXOk(ent) && c > 1 && c < 300) {
+            int score = 0;
+            for (int k = 0; k < 8 && k < c; k++) {
+                void *e = VXAt(ent, 0x30 + k * 0x18);
+                if (VXName(e)) score++;
+            }
+            if (score >= 2 && score > bestScore) {
+                *oObj = l; *oOff = off; *oN = c; *oDict = YES; bestScore = score; found = YES;
             }
         }
     }
@@ -508,15 +524,22 @@ static void VXTick(void){
             void *pl = VXAt(items, base + i * stride);
             if (!VXOk(pl)) { g_D++; continue; }
 
-            CGPoint head, toe;
-            if (!VXHeadToe(pl, &head, &toe)) { g_D++; continue; }
+            if (pl == g_local) continue;
+            if (!VXName(pl)) { g_D++; continue; }
+
+            CGPoint head;
+            if (!VXHead(pl, &head)) {
+                void *tf = VXAt(pl, 0x3E8);
+                if (!VXOk(tf) || !VXPos(tf, &head)) { g_D++; continue; }
+            }
+            CGPoint toe = CGPointMake(head.x, head.y - 1.75f);
 
             CGPoint ph, pt;
             if (!VXProj(head, sz, &ph)) { g_D++; continue; }
             if (!VXProj(toe, sz, &pt)) { g_D++; continue; }
 
             float h = fabsf(pt.y - ph.y);
-            if (h < 6 || h > sz.height) continue;
+            if (h < 4 || h > sz.height * 0.6f) { g_D++; continue; }
             float w = h * 0.5f;
 
             float top = (ph.y < pt.y) ? ph.y : pt.y;
