@@ -30,13 +30,11 @@ jobs:
       - name: Desempaquetar
         run: |
           set -euo pipefail
-          mkdir -p work
           cd work
           unzip -q base.ipa -d app
           cd ..
           APP=$(ls -d work/app/Payload/*.app | head -1)
           echo "APP=$APP" >> $GITHUB_ENV
-          echo "NAME=$(basename "$APP")" >> $GITHUB_ENV
           ls "$APP" | head -30
 
       - name: Compilar dylib
@@ -44,15 +42,32 @@ jobs:
           set -euo pipefail
           mkdir -p out
           xcrun -sdk iphoneos clang -arch arm64 -dynamiclib \
-            -O2 -fobjc-arc -fvisibility=hidden \
+            -O2 -fobjc-arc \
             -isysroot "$(xcrun --sdk iphoneos --show-sdk-path)" \
             -miphoneos-version-min=13.0 \
             -framework UIKit -framework Foundation -framework CoreGraphics \
             -framework Security -framework QuartzCore \
             -install_name @executable_path/Frameworks/libveexcore.dylib \
+            -Wl,-headerpad_max_install_names \
             -o out/libveexcore.dylib src/Veex.m
           xcrun -sdk iphoneos strip -x out/libveexcore.dylib
           ls -la out/
+
+      - name: Entitlements
+        run: |
+          cat > ent.plist <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>com.apple.security.cs.disable-library-validation</key>
+            <true/>
+            <key>get-task-allow</key>
+            <true/>
+          </dict>
+          </plist>
+          EOF
+          plutil -lint ent.plist
 
       - name: Inyectar
         run: |
@@ -83,12 +98,13 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf "$APP/_CodeSignature"
-          if [ -d "$APP/Frameworks" ]; then
-            find "$APP/Frameworks" -maxdepth 1 -type f -name "*.dylib" \
-              -exec codesign --force --sign - {} \;
-          fi
-          codesign --force --sign - --timestamp=none "$APP"
-          codesign -dv "$APP" 2>&1 | head -5
+          find "$APP" -name "*.dylib" -exec codesign --force --sign - \
+            --entitlements ent.plist --timestamp=none {} \;
+          find "$APP/Frameworks" -maxdepth 1 -type f -name "*.dylib" \
+            -exec codesign --force --sign - --entitlements ent.plist --timestamp=none {} \;
+          codesign --force --deep --sign - --entitlements ent.plist --timestamp=none "$APP"
+          codesign -dv --entitlements :- "$APP" 2>&1 | head -20
+          codesign -v --deep --strict "$APP" && echo "firma OK"
 
       - name: Empaquetar
         run: |
