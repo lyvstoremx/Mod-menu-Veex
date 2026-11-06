@@ -584,7 +584,8 @@ static VXMenu *g_menu = nil;
 @implementation VXMenu
 
 + (void)show {
-    if (g_root) return;
+    if (g_root && g_root.superview) return;
+    if (g_root && !g_root.superview) g_root = nil;
     g_menu = [VXMenu new];
 
     UIWindow *kw = UIApplication.sharedApplication.keyWindow;
@@ -675,11 +676,29 @@ static VXMenu *g_menu = nil;
 
 @end
 
-#pragma mark - constructor
+#pragma mark - arranque
 
 __attribute__((constructor))
 static void VXInit(void){
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [VXMenu show];
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        for (int i = 0; i < 900; i++) {
+            __block BOOL up = NO;
+            dispatch_sync(dispatch_get_main_queue(), ^{
+                UIApplication *a = [UIApplication sharedApplication];
+                up = a != nil && a.windows.count > 0 && a.keyWindow != nil;
+            });
+            if (up) break;
+            usleep(200000);
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [VXMenu show];
+            [NSTimer scheduledTimerWithTimeInterval:1.0 repeats:YES block:^(NSTimer *tt){
+                if (g_root && g_root.superview) return;
+                if (g_root && !g_root.superview) g_root = nil;
+                UIWindow *kw = UIApplication.sharedApplication.keyWindow;
+                if (!kw) return;
+                [VXMenu show];
+            }];
+        });
     });
 }
