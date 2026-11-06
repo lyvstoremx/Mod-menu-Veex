@@ -156,10 +156,10 @@ static void *VXS(const char *n) {
 }
 
 static UIColor *VXC(NSString *hex, UIColor *fallback) {
-    if (!hex || hex.length < 6) return fallback;
+    if (!hex || hex.length < 6) return fallback ?: [UIColor whiteColor];
     unsigned int v = 0;
     NSScanner *s = [NSScanner scannerWithString:[hex stringByReplacingOccurrencesOfString:@"#" withString:@""]];
-    if (![s scanHexInt:&v]) return fallback;
+    if (![s scanHexInt:&v]) return fallback ?: [UIColor whiteColor];
     return [UIColor colorWithRed:((v >> 16) & 0xFF) / 255.0
                            green:((v >> 8) & 0xFF) / 255.0
                             blue:(v & 0xFF) / 255.0
@@ -482,41 +482,16 @@ static float VXDist(V3 a, V3 b) {
 
 #pragma mark - colecta (fuera del main)
 
-static void VXCollect(void) {
-    if (!g_ready || !g.esp) {
-        pthread_mutex_lock(&g_mtx);
-        g_sn = 0;
-        pthread_mutex_unlock(&g_mtx);
-        return;
-    }
-
-    VXAttach();
-
-    void *cam = VXCam();
-    if (!cam) return;
-
-    void *local = VXLocal();
-    void *ltr = local ? VXTransformOf(local) : NULL;
-    V3 lpos;
-    BOOL hasL = ltr && VXPosOf(ltr, &lpos);
-    int lteam = local ? VXTeam(local) : -1;
-
-    int cnt = 0;
-    void *items = VXList(&cnt);
-    if (!items) {
-        pthread_mutex_lock(&g_mtx);
-        g_sn = 0;
-        pthread_mutex_unlock(&g_mtx);
-        return;
-    }
-
+static int VXPass(void *items, int cnt, void *local, V3 lpos, BOOL hasL, int lteam, BOOL useTeam) {
     int out = 0;
     for (int i = 0; i < cnt && out < VXMAX; i++) {
         void *p = VXItem(items, i);
         if (!p || p == local) continue;
 
-        int team = VXTeam(p);
-        if (lteam >= 0 && team >= 0 && team == lteam) continue;
+        if (useTeam) {
+            int team = VXTeam(p);
+            if (lteam >= 0 && team >= 0 && team == lteam) continue;
+        }
 
         void *htf = NULL, *ttf = NULL;
         if (!VXExtremeY(p, YES, &htf)) htf = VXTransformOf(p);
@@ -577,6 +552,39 @@ static void VXCollect(void) {
         e->valid = YES;
         out++;
     }
+    return out;
+}
+
+static void VXCollect(void) {
+    if (!g_ready || !g.esp) {
+        pthread_mutex_lock(&g_mtx);
+        g_sn = 0;
+        pthread_mutex_unlock(&g_mtx);
+        return;
+    }
+
+    VXAttach();
+
+    void *cam = VXCam();
+    if (!cam) return;
+
+    void *local = VXLocal();
+    void *ltr = local ? VXTransformOf(local) : NULL;
+    V3 lpos;
+    BOOL hasL = ltr && VXPosOf(ltr, &lpos);
+    int lteam = local ? VXTeam(local) : -1;
+
+    int cnt = 0;
+    void *items = VXList(&cnt);
+    if (!items || cnt <= 0) {
+        pthread_mutex_lock(&g_mtx);
+        g_sn = 0;
+        pthread_mutex_unlock(&g_mtx);
+        return;
+    }
+
+    int out = VXPass(items, cnt, local, lpos, hasL, lteam, YES);
+    if (out == 0) out = VXPass(items, cnt, local, lpos, hasL, lteam, NO);
 
     pthread_mutex_lock(&g_mtx);
     memcpy(g_snap, g_tmp, sizeof(VXEnt) * out);
@@ -605,13 +613,14 @@ static NSString *VXReport(void) {
     }
     [s appendFormat:@"w2vp %p\n", g_w2vp];
     [s appendFormat:@"pos %p\n", g_getPosInj];
-    [s appendFormat:@"camMgrOk %d\n", VXMatchGame() ? 1 : 0];
+    [s appendFormat:@"dib %ld\n", (long)g_entities];
+    if (n == 0) [s appendString:@"(lobby? entra a partida)"];
     return s;
 }
 
 static void VXShow(NSString *t) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (g_status) g_status.text = t.length > 200 ? [t substringToIndex:200] : t;
+        if (g_status) g_status.text = t.length > 220 ? [t substringToIndex:220] : t;
     });
 }
 
@@ -671,7 +680,9 @@ static void VXAimStep(void) {
     CGContextRef c = UIGraphicsGetCurrentContext();
     if (!c) return;
 
+    UIColor *col = g.color ?: [UIColor whiteColor];
     CGSize sz = VXSize();
+
     if (g.fovCircle && g.aim) {
         CGContextSetStrokeColorWithColor(c, [[UIColor colorWithWhite:1 alpha:0.5] CGColor]);
         CGContextSetLineWidth(c, 1);
@@ -680,7 +691,7 @@ static void VXAimStep(void) {
     }
 
     if (g.crosshair) {
-        CGContextSetStrokeColorWithColor(c, g.color.CGColor);
+        CGContextSetStrokeColorWithColor(c, col.CGColor);
         CGContextSetLineWidth(c, 1);
         CGPoint m = CGPointMake(sz.width / 2, sz.height / 2);
         CGContextMoveToPoint(c, m.x - 9, m.y);
@@ -704,7 +715,7 @@ static void VXAimStep(void) {
     pthread_mutex_unlock(&g_mtx);
 
     CGContextSetLineWidth(c, 1.2);
-    CGContextSetStrokeColorWithColor(c, g.color.CGColor);
+    CGContextSetStrokeColorWithColor(c, col.CGColor);
 
     NSInteger drawn = 0;
     for (int i = 0; i < n; i++) {
@@ -749,19 +760,19 @@ static void VXAimStep(void) {
             CGContextFillRect(c, CGRectMake(box.origin.x - 6, box.origin.y, 3, rawH));
             CGContextSetFillColorWithColor(c, [[UIColor greenColor] CGColor]);
             CGContextFillRect(c, CGRectMake(box.origin.x - 6, box.origin.y + rawH * (1 - pct), 3, rawH * pct));
-            CGContextSetStrokeColorWithColor(c, g.color.CGColor);
+            CGContextSetStrokeColorWithColor(c, col.CGColor);
         }
         if (g.espBits & (1 << VXEspName)) {
             NSString *nm = e->name[0] ? [NSString stringWithUTF8String:e->name] : @"";
             [nm drawAtPoint:CGPointMake(box.origin.x, box.origin.y - 12)
              withAttributes:@{ NSFontAttributeName: [UIFont boldSystemFontOfSize:9],
-                               NSForegroundColorAttributeName: g.color }];
+                               NSForegroundColorAttributeName: col }];
         }
         if (g.espBits & (1 << VXEspDist)) {
             NSString *ds = [NSString stringWithFormat:@"%.0fm", e->dist];
             [ds drawAtPoint:CGPointMake(box.origin.x, box.origin.y + rawH + 2)
              withAttributes:@{ NSFontAttributeName: [UIFont boldSystemFontOfSize:9],
-                               NSForegroundColorAttributeName: g.color }];
+                               NSForegroundColorAttributeName: col }];
         }
         drawn++;
     }
@@ -789,6 +800,7 @@ static void VXAimStep(void) {
 - (void)onColor:(UIButton *)b;
 - (void)doDump;
 - (void)doBoot;
+- (void)doReset;
 - (void)paint:(UIButton *)b;
 @end
 
@@ -840,8 +852,9 @@ static void VXAimStep(void) {
         default: break;
     }
     b.backgroundColor = [UIColor colorWithWhite:0.10 alpha:1];
-    b.layer.borderColor = (on ? g_accent : [UIColor colorWithWhite:0.30 alpha:1]).CGColor;
-    [b setTitleColor:(on ? g_accent : [UIColor colorWithWhite:0.90 alpha:1]) forState:UIControlStateNormal];
+    UIColor *acc = g_accent ?: [UIColor greenColor];
+    b.layer.borderColor = (on ? acc : [UIColor colorWithWhite:0.30 alpha:1]).CGColor;
+    [b setTitleColor:(on ? acc : [UIColor colorWithWhite:0.90 alpha:1]) forState:UIControlStateNormal];
 }
 
 - (void)onChip:(UIButton *)b {
@@ -859,6 +872,7 @@ static void VXAimStep(void) {
         case 111: g.diag = !g.diag; break;
         case 112: [self doDump]; break;
         case 113: g_panel.hidden = YES; break;
+        case 114: [self doReset]; break;
     }
     [self paint:b];
 }
@@ -869,7 +883,10 @@ static void VXAimStep(void) {
 
 - (void)onColor:(UIButton *)b {
     NSArray *hex = @[ @"#FFFFFF", @"#00FF66", @"#FF3355", @"#33AAFF", @"#FFCC00", @"#CC66FF" ];
-    g.color = VXC(hex[b.tag - 301], [UIColor whiteColor]);
+    NSInteger i = b.tag - 301;
+    if (i < 0 || i >= (NSInteger)hex.count) return;
+    UIColor *c = VXC(hex[i], [UIColor whiteColor]);
+    if (c) g.color = c;
 }
 
 - (void)doBoot {
@@ -890,6 +907,39 @@ static void VXAimStep(void) {
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
         VXAttach();
         VXShow(VXReport());
+    });
+}
+
+- (void)doReset {
+    VXShow(@"reset guest...");
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        @try {
+            NSArray *keys = @[ @"guest", @"account", @"login", @"session", @"token", @"uid" ];
+            NSFileManager *fm = [NSFileManager defaultManager];
+            NSString *docs = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
+            if (docs) {
+                for (NSString *f in [fm contentsOfDirectoryAtPath:docs error:nil]) {
+                    NSString *low = f.lowercaseString;
+                    for (NSString *k in keys) {
+                        if ([low containsString:k]) {
+                            [fm removeItemAtPath:[docs stringByAppendingPathComponent:f] error:nil];
+                            break;
+                        }
+                    }
+                }
+            }
+            NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+            for (NSString *k in d.dictionaryRepresentation.allKeys) {
+                NSString *low = k.lowercaseString;
+                for (NSString *n in keys) {
+                    if ([low containsString:n]) { [d removeObjectForKey:k]; break; }
+                }
+            }
+            [d synchronize];
+            VXShow(@"guest reset · cierra y abre el juego");
+        } @catch (NSException *ex) {
+            VXShow(@"reset fallo");
+        }
     });
 }
 
@@ -1119,7 +1169,8 @@ static void VXBuildMenu(void) {
 
     [sv addSubview:[host label:@"SISTEMA" size:10 color:[UIColor colorWithWhite:0.5 alpha:1] y:y]];
     y += 20;
-    [sv addSubview:[host chip:@"ESTADO" x:14 y:y w:100 tag:112]];
+    [sv addSubview:[host chip:@"ESTADO" x:14 y:y w:96 tag:112]];
+    [sv addSubview:[host chip:@"RESET GUEST" x:118 y:y w:120 tag:114]];
     y += 40;
 
     g_status = [[UILabel alloc] initWithFrame:CGRectMake(14, y, pw - 28, 90)];
