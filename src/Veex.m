@@ -141,7 +141,6 @@ static inline BOOL VXPtr(void *p) {
 
 static inline CGSize VXSize(void) {
     UIWindow *w = [UIApplication sharedApplication].keyWindow;
-    if (!w) w = [UIScreen mainScreen].bounds.size.width ? nil : nil;
     CGSize s = w ? w.bounds.size : [UIScreen mainScreen].bounds.size;
     if (s.width < 10 || s.height < 10) s = [UIScreen mainScreen].bounds.size;
     return s;
@@ -795,15 +794,12 @@ static void VXAimStep(void) {
 
 @implementation VeexPanel
 
-- (BOOL)hitTest:(CGPoint)p withEvent:(UIEvent *)e {
-    if (!g_bubble) return NO;
-    if (g_panel && !g_panel.hidden) {
-        CGRect q = [g_panel convertRect:g_panel.bounds toView:self];
-        if (CGRectContainsPoint(q, p)) return YES;
-    }
-    CGRect b = [g_bubble convertRect:g_bubble.bounds toView:self];
-    if (CGRectContainsPoint(CGRectInset(b, -18, -18), p)) return YES;
-    return NO;
+- (UIView *)hitTest:(CGPoint)p withEvent:(UIEvent *)e {
+    if (!g_bubble) return nil;
+    CGPoint bp = [g_bubble convertPoint:p fromView:self];
+    if (CGRectContainsPoint(CGRectInset(g_bubble.bounds, -16, -16), bp)) return g_bubble;
+    if (g_panel && !g_panel.hidden) return [super hitTest:p withEvent:e];
+    return nil;
 }
 
 - (UILabel *)label:(NSString *)t size:(CGFloat)s color:(UIColor *)c y:(CGFloat)y {
