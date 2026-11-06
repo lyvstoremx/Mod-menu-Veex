@@ -30,17 +30,23 @@ jobs:
 
       - name: Dumper
         run: |
-          git clone --depth 1 https://github.com/tien0246/Il2CppDumper-Free-Fire.git d || echo "CLONE FALLO"
+          git clone --depth 1 https://github.com/tien0246/Il2CppDumper-Free-Fire.git d
           cd d
-          ls -la
-          dotnet build -c Release 2>&1 | tail -30 || echo "BUILD FALLO"
-          echo "--- dlls encontradas ---"
-          find . -name "*.dll" -path "*bin*" | head -20
-          find . -iname "*il2cpp*" | head -20
+          dotnet build -c Release 2>&1 | tail -15
+          ls -la Il2CppDumper/bin/Release/net6.0/ | head -20
 
-      - name: Config
+      - name: Run
         run: |
-          cat > d/config.json <<'EOF'
+          set -x
+          OUTDIR="d/Il2CppDumper/bin/Release/net6.0"
+          EXE="$OUTDIR/Il2CppDumper.dll"
+          if [ ! -f "$EXE" ]; then
+            EXE=$(find . -name "Il2CppDumper.dll" | head -1)
+            OUTDIR=$(dirname "$EXE")
+          fi
+          echo "EXE=[$EXE]"
+
+          cat > "$OUTDIR/config.json" <<'EOF'
           {
             "DumpMethod": false,
             "DumpField": true,
@@ -55,26 +61,19 @@ jobs:
             "ForceDump": false
           }
           EOF
-          echo "config escrito"
 
-      - name: Run
-        run: |
-          EXE=$(find d -name "Il2CppDumper.dll" | head -1)
-          echo "EXE=[$EXE]"
           UF="$APP/Frameworks/UnityFramework.framework/UnityFramework"
           META="$APP/Data/Managed/Metadata/global-metadata.dat"
           echo "UF=[$UF]"
           echo "META=[$META]"
-          ls -la "$UF" "$META"
+          ls -la "$UF" "$META" || true
+
           mkdir -p out
-          if [ -n "$EXE" ]; then
-            dotnet "$EXE" "$UF" "$META" out 2>&1 | tail -40 || echo "DUMPER ERROR"
-          else
-            echo "NO HAY DLL DEL DUMPER"
-          fi
+          dotnet "$EXE" "$UF" "$META" out 2>&1 | tail -60 || true
+
           echo "--- salida ---"
           ls -la out || true
-          find . -maxdepth 3 -name "dump.cs" | head
+          find . -name "dump.cs" -not -path "./d/*" | head
 
       - name: Extracto
         run: |
@@ -84,9 +83,7 @@ jobs:
           if not os.path.exists(p):
               print("SIN dump.cs")
               for f in glob.glob('**/dump.cs', recursive=True):
-                  print("encontrado en:", f)
-                  p = f
-                  break
+                  print("encontrado en:", f); p = f; break
           if not os.path.exists(p):
               print("nada que extraer"); raise SystemExit
           s = open(p, encoding='utf-8', errors='ignore').read()
