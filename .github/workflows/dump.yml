@@ -30,20 +30,11 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/Perfare/Il2CppDumper.git d
           cd d
-          dotnet build -c Release 2>&1 | tail -15
-          ls -la Il2CppDumper/bin/Release/net6.0/ | head -20
+          dotnet build -c Release 2>&1 | tail -8
 
       - name: Run
         run: |
-          set -x
           OUTDIR="d/Il2CppDumper/bin/Release/net6.0"
-          EXE="$OUTDIR/Il2CppDumper.dll"
-          if [ ! -f "$EXE" ]; then
-            EXE=$(find . -name "Il2CppDumper.dll" | head -1)
-            OUTDIR=$(dirname "$EXE")
-          fi
-          echo "EXE=[$EXE]"
-
           cat > "$OUTDIR/config.json" <<'EOF'
           {
             "DumpMethod": false,
@@ -59,36 +50,36 @@ jobs:
             "ForceDump": false
           }
           EOF
-
           UF="$APP/Frameworks/UnityFramework.framework/UnityFramework"
           META="$APP/Data/Managed/Metadata/global-metadata.dat"
-          ls -la "$UF" "$META" || true
-
           mkdir -p out
-          dotnet "$EXE" "$UF" "$META" out 2>&1 | tail -60 || true
+          dotnet "$OUTDIR/Il2CppDumper.dll" "$UF" "$META" out 2>&1 | tail -10
 
-          echo "--- salida ---"
-          ls -la out || true
-
-      - name: Extracto
+      - name: Player
         run: |
           python3 - <<'PY'
-          import os, glob
-          p = 'out/dump.cs'
-          if not os.path.exists(p):
-              print("SIN dump.cs")
-              for f in glob.glob('**/dump.cs', recursive=True):
-                  print("encontrado en:", f); p = f; break
-          if not os.path.exists(p):
-              print("nada que extraer"); raise SystemExit
-          s = open(p, encoding='utf-8', errors='ignore').read()
-          lines = s.splitlines()
-          print("LINEAS TOTAL", len(lines))
-          res = []
-          for kw in ["class Player", "class GameFacade", "class MatchGame", "JMAGGLCNGIG"]:
-              hits = [i for i, l in enumerate(lines) if kw in l]
-              res.append("\n=== %s (%d) ===" % (kw, len(hits)))
-              for i in hits[:2]:
-                  res.append("\n".join(lines[i:i+90]))
-          print("\n".join(res)[:70000])
+          s = open('out/dump.cs', encoding='utf-8', errors='ignore').read().splitlines()
+          hits = [i for i, l in enumerate(s) if 'TypeDefIndex: 31767' in l]
+          print("HITS PLAYER", hits[:3])
+          for i in hits[:1]:
+              print("\n".join(s[max(0,i-3):i+170]))
+          PY
+
+      - name: Match
+        run: |
+          python3 - <<'PY'
+          s = open('out/dump.cs', encoding='utf-8', errors='ignore').read().splitlines()
+          hits = [i for i, l in enumerate(s) if 'TypeDefIndex: 32076' in l]
+          print("HITS MATCH", hits[:3])
+          for i in hits[:1]:
+              print("\n".join(s[max(0,i-3):i+200]))
+          PY
+
+      - name: Listas
+        run: |
+          python3 - <<'PY'
+          s = open('out/dump.cs', encoding='utf-8', errors='ignore').read().splitlines()
+          for i, l in enumerate(s):
+              if 'List<Player>' in l or 'List<BEADLMGGGGL>' in l or 'OriginalNickName' in l:
+                  print("%d| %s" % (i, l.strip()))
           PY
