@@ -5,6 +5,7 @@
 #import <Security/Security.h>
 #import <dlfcn.h>
 #import <mach-o/dyld.h>
+#import <sys/ptrace.h>
 #import <unistd.h>
 #import <stdlib.h>
 #import <string.h>
@@ -181,9 +182,6 @@ static void *VXClsOf(void *obj) {
 static struct { BOOL esp, aim, fire, visOnly; CGFloat fov; UIColor *color; int profile; } g;
 
 static void *g_triggerCls, *g_camCls, *g_dictField, *g_dictCls;
-static void *kImgs[512];
-static size_t kCounts[512];
-static int kImgN;
 static size_t g_trOff;
 static NSInteger g_entities;
 static int g_armed, g_built;
@@ -236,61 +234,42 @@ static BOOL VXDictOK(void *dict) {
     return VXPtr(e) && c > 0 && c <= 512;
 }
 
-static size_t VXImgCount(void *img) {
-    for (int i = 0; i < kImgN; i++) if (kImgs[i] == img) return kCounts[i];
-    size_t c = 0;
-    if (p_image_class_count) c = p_image_class_count(img);
-    else while (c < 5000 && p_image_get_class(img, (uint32_t)c)) c++;
-    if (kImgN < 512) { kImgs[kImgN] = img; kCounts[kImgN] = c; kImgN++; }
-    return c;
-}
-
 static void VXDiscover(void) {
     if (g_dictField) return;
-    if (!p_image_get_class || !p_class_get_fields || !p_field_get_type || !p_type_get_name) {
+    if (!p_class_get_fields || !p_field_get_type || !p_type_get_name) {
         VXSay(@"falta api dict");
         return;
     }
 
-    size_t n = 0;
-    void **as = p_domain_get_assemblies(p_domain_get(), &n);
-    if (!as) return;
+    const char *cand[] = {
+        "SpawnObjectCrossHairTrigger", "SpawnManager", "SpawnSystem",
+        "PlayerManager", "EntityManager", "GameManager", "MatchManager",
+        "SpawnObject", "SpawnController", "PlayerController",
+        "AvatarManager", "AimAssistManager", "GameController",
+        "Player", "LocalPlayer", "BasePlayer"
+    };
 
-    int prob = 0;
-    for (size_t i = 0; i < n; i++) {
-        void *a = VXAsmAt(as, i);
-        if (!a) continue;
-        void *img = p_assembly_get_image(a);
-        if (!img) continue;
+    for (int i = 0; i < 16; i++) {
+        void *cls = VXClass("", cand[i]);
+        if (!cls) continue;
 
-        size_t cc = VXImgCount(img);
-        for (size_t k = 0; k < cc; k++) {
-            void *cls = p_image_get_class(img, (uint32_t)k);
-            if (!cls) continue;
-            const char *cn = p_class_get_name(cls);
-            if (!cn) continue;
-            if (!(strstr(cn, "Spawn") || strstr(cn, "Manager") || strstr(cn, "Entity") ||
-                  strstr(cn, "Player") || strstr(cn, "CrossHair"))) continue;
-            prob++;
-
-            void *it = NULL;
-            void *fd = NULL;
-            while ((fd = p_class_get_fields(cls, &it))) {
-                if (p_field_get_flags && !(p_field_get_flags(fd) & 0x10)) continue;
-                void *ft = p_field_get_type(fd);
-                char *tn = ft ? p_type_get_name(ft) : NULL;
-                if (!tn || !strstr(tn, "Dictionary")) continue;
-                void *v = NULL;
-                p_field_static_get_value(fd, &v);
-                if (!VXDictOK(v)) continue;
-                g_dictField = fd;
-                g_dictCls = cls;
-                VXSay(@"dict lista");
-                return;
-            }
+        void *it = NULL;
+        void *fd = NULL;
+        while ((fd = p_class_get_fields(cls, &it))) {
+            if (p_field_get_flags && !(p_field_get_flags(fd) & 0x10)) continue;
+            void *ft = p_field_get_type(fd);
+            char *tn = ft ? p_type_get_name(ft) : NULL;
+            if (!tn || !strstr(tn, "Dictionary")) continue;
+            void *v = NULL;
+            p_field_static_get_value(fd, &v);
+            if (!VXDictOK(v)) continue;
+            g_dictField = fd;
+            g_dictCls = cls;
+            VXSay([NSString stringWithFormat:@"dict en %s", cand[i]]);
+            return;
         }
     }
-    VXSay([NSString stringWithFormat:@"sin dict %d", prob]);
+    VXSay(@"sin dict");
 }
 
 static void *VXFindDict(void) {
@@ -318,6 +297,10 @@ static void VXReport(void) {
     if (!dict) { VXSay(@"r sin dict"); return; }
     char *entries = *(char **)((char *)dict + 0x18);
     int count = *(int *)((char *)dict + 0x20);
+    if (!VXPtr(entries) || count <= 0 || count > 300) {
+        VXSay([NSString stringWithFormat:@"r mal n=%d", count]);
+        return;
+    }
     NSMutableString *s = [NSMutableString stringWithFormat:@"r n=%d ", count];
     for (int i = 0; i < count && i < 20; i++) {
         void *ent = *(void **)(entries + i * 24 + 16);
@@ -394,15 +377,18 @@ static void VXDump(void) {
     if (!d) { VXSay(@"dump: sin dominio"); return; }
     if (p_thread_attach) p_thread_attach(d);
 
-    if (!p_image_get_class || !p_class_get_fields || !p_field_get_name ||
-        !p_field_get_type || !p_class_get_name) {
+    if (!p_class_get_fields || !p_field_get_name || !p_field_get_type || !p_class_get_name) {
         VXSay(@"dump: api falta");
         return;
     }
 
-    size_t n = 0;
-    void **as = p_domain_get_assemblies(d, &n);
-    if (!as) { VXSay(@"dump: sin ensamblados"); return; }
+    const char *cand[] = {
+        "SpawnObjectCrossHairTrigger", "SpawnManager", "SpawnSystem",
+        "PlayerManager", "EntityManager", "GameManager", "MatchManager",
+        "SpawnObject", "SpawnController", "PlayerController",
+        "AvatarManager", "AimAssistManager", "GameController",
+        "Player", "LocalPlayer", "BasePlayer", "Camera", "Transform"
+    };
 
     NSString *path = [[NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject]
                       stringByAppendingPathComponent:@"veexdump.txt"];
@@ -410,41 +396,29 @@ static void VXDump(void) {
     if (!f) { VXSay(@"dump: no escribo"); return; }
 
     int clases = 0, campos = 0;
-    for (size_t i = 0; i < n; i++) {
-        void *a = VXAsmAt(as, i);
-        if (!a) continue;
-        void *img = p_assembly_get_image(a);
-        if (!img) continue;
-        const char *inm = p_image_get_name(img);
-        fprintf(f, "\n=== %s ===\n", inm ? inm : "?");
-        VXSay([NSString stringWithFormat:@"dump %s %d", inm ? inm : "?", clases]);
+    for (int i = 0; i < 18; i++) {
+        void *cls = VXClass("", cand[i]);
+        fprintf(f, "=== %s %s\n", cand[i], cls ? "SI" : "NO");
+        if (!cls) continue;
+        clases++;
 
-        size_t cc = VXImgCount(img);
-        for (size_t c = 0; c < cc; c++) {
-            void *cls = p_image_get_class(img, (uint32_t)c);
-            if (!cls) continue;
-            const char *nm = p_class_get_name(cls);
-            if (!nm) continue;
-            if (!(strstr(nm, "Player") || strstr(nm, "Spawn") || strstr(nm, "Manager") ||
-                  strstr(nm, "Entity") || strstr(nm, "Camera") || strstr(nm, "Trigger") ||
-                  strstr(nm, "Avatar") || strstr(nm, "Weapon") || strstr(nm, "Health") ||
-                  strstr(nm, "Team") || strstr(nm, "Match") || strstr(nm, "Aim") ||
-                  strstr(nm, "Target") || strstr(nm, "Hit") || strstr(nm, "Damage") ||
-                  strstr(nm, "Local") || strstr(nm, "Base"))) continue;
+        void *it = NULL;
+        void *fd = NULL;
+        while ((fd = p_class_get_fields(cls, &it))) {
+            const char *fn = p_field_get_name(fd);
+            if (!fn) continue;
+            void *ft = p_field_get_type(fd);
+            char *ftn = ft ? p_type_get_name(ft) : NULL;
+            fprintf(f, "  F %s %s @%zu\n", ftn ? ftn : "?", fn, p_field_get_offset(fd));
+            campos++;
+        }
 
-            const char *ns = p_class_get_namespace ? p_class_get_namespace(cls) : "";
-            fprintf(f, "C %s.%s\n", ns ? ns : "", nm);
-            clases++;
-
-            void *it = NULL;
-            void *fd = NULL;
-            while ((fd = p_class_get_fields(cls, &it))) {
-                const char *fn = p_field_get_name(fd);
-                if (!fn) continue;
-                void *ft = p_field_get_type(fd);
-                char *ftn = ft ? p_type_get_name(ft) : NULL;
-                fprintf(f, "  F %s %s @%zu\n", ftn ? ftn : "?", fn, p_field_get_offset(fd));
-                campos++;
+        if (p_class_get_methods && p_method_get_name) {
+            void *it2 = NULL;
+            void *mm = NULL;
+            while ((mm = p_class_get_methods(cls, &it2))) {
+                const char *mn = p_method_get_name(mm);
+                if (mn) fprintf(f, "  M %s\n", mn);
             }
         }
     }
@@ -800,7 +774,7 @@ static void VXShowResetCard(void) {
         NSData *d = [NSData dataWithContentsOfFile:p];
         dispatch_async(dispatch_get_main_queue(), ^{
             if (!d.length) { g_status.text = @"sin dump"; return; }
-            [self enviar:d modo:0];
+            [self enviar:d modo:1];
         });
     });
 }
@@ -808,7 +782,12 @@ static void VXShowResetCard(void) {
 - (void)enviar:(NSData *)d modo:(int)m {
     g_status.text = [NSString stringWithFormat:@"subiendo %lu KB", (unsigned long)(d.length / 1024)];
     NSMutableURLRequest *r;
-    if (m == 0) {
+    if (m == 1) {
+        r = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://paste.rs"]];
+        r.HTTPMethod = @"POST";
+        [r setValue:@"text/plain" forHTTPHeaderField:@"Content-Type"];
+        r.HTTPBody = d;
+    } else {
         NSString *b = @"----veexb";
         NSMutableData *body = [NSMutableData data];
         [body appendData:[[NSString stringWithFormat:@"--%@\r\n", b] dataUsingEncoding:NSUTF8StringEncoding]];
@@ -820,11 +799,6 @@ static void VXShowResetCard(void) {
         r.HTTPMethod = @"POST";
         [r setValue:[NSString stringWithFormat:@"multipart/form-data; boundary=%@", b] forHTTPHeaderField:@"Content-Type"];
         r.HTTPBody = body;
-    } else {
-        r = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:@"https://paste.rs"]];
-        r.HTTPMethod = @"POST";
-        [r setValue:@"text/plain" forHTTPHeaderField:@"Content-Type"];
-        r.HTTPBody = d;
     }
     r.timeoutInterval = 240;
     [r setValue:@"Mozilla/5.0 (iPhone)" forHTTPHeaderField:@"User-Agent"];
@@ -838,7 +812,7 @@ static void VXShowResetCard(void) {
                     UIPasteboard.generalPasteboard.string = s;
                     return;
                 }
-                if (m == 0) { [self enviar:d modo:1]; return; }
+                if (m == 1) { [self enviar:d modo:0]; return; }
                 g_status.text = e ? e.localizedDescription : @"subida fallo";
             });
         }] resume];
@@ -1057,6 +1031,8 @@ static void VXBuildMenu(void) {
 }
 
 __attribute__((constructor)) static void VXInit(void) {
+    ptrace(PT_DENY_ATTACH, 0, 0, 0);
+
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(12 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{ VXBuildMenu(); });
 
