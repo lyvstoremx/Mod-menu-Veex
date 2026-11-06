@@ -11,11 +11,6 @@
 #import <unistd.h>
 #import <stdlib.h>
 
-#ifndef PT_DENY_ATTACH
-#define PT_DENY_ATTACH 31
-#endif
-extern int ptrace(int _request, pid_t _pid, char *_addr, int _data);
-
 #pragma mark - tipos
 
 typedef struct { float x, y, z; } V3;
@@ -106,7 +101,7 @@ static void (*p_free)(void *);
 static void *(*p_string_new)(const char *);
 static void *(*p_class_get_property_from_name)(void *, const char *);
 static void *(*p_property_get_get_method)(void *);
-static void *(*p_method_get_param_count)(void *);
+static uint32_t (*p_method_get_param_count)(void *);
 
 #pragma mark - utilidades
 
@@ -958,7 +953,6 @@ static void VXAimStep(void) {
 - (void)tick {
     if (!g_hidOnce) {
         g_hidOnce = YES;
-        ptrace(PT_DENY_ATTACH, 0, 0, 0);
     }
     g_frames++;
     if (g_draw) [g_draw setNeedsDisplay];
