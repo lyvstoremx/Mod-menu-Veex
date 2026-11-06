@@ -36,6 +36,7 @@ typedef const char *(*fn_class_get_namespace)(void *);
 typedef void *(*fn_class_get_fields)(void *, void **);
 typedef const char *(*fn_field_get_name)(void *);
 typedef void *(*fn_field_get_type)(void *);
+typedef uint32_t (*fn_field_get_flags)(void *);
 
 static fn_domain_get                 p_domain_get;
 static fn_domain_get_assemblies      p_domain_get_assemblies;
@@ -64,6 +65,7 @@ static fn_class_get_namespace        p_class_get_namespace;
 static fn_class_get_fields           p_class_get_fields;
 static fn_field_get_name             p_field_get_name;
 static fn_field_get_type             p_field_get_type;
+static fn_field_get_flags            p_field_get_flags;
 
 typedef struct { float x, y, z; } V3;
 
@@ -107,6 +109,7 @@ static BOOL VXResolve(void) {
     p_class_get_fields           = (fn_class_get_fields)VXSym("il2cpp_class_get_fields");
     p_field_get_name             = (fn_field_get_name)VXSym("il2cpp_field_get_name");
     p_field_get_type             = (fn_field_get_type)VXSym("il2cpp_field_get_type");
+    p_field_get_flags            = (fn_field_get_flags)VXSym("il2cpp_field_get_flags");
 
     if (!p_domain_get || !p_domain_get_assemblies || !p_assembly_get_image ||
         !p_image_get_name || !p_class_from_name || !p_class_get_field_from_name ||
@@ -213,6 +216,9 @@ static struct {
 static void *g_triggerCls;
 static void *g_camCls;
 static size_t g_trOff;
+static void *g_dictField;
+static void *g_dictCls;
+static NSTimeInterval g_lastScan;
 static NSInteger g_entities;
 static int g_armed;
 static int g_built;
@@ -263,22 +269,80 @@ static UIButton *VXB(NSString *t, CGFloat w, CGFloat h) {
 
 static NSString *VXExcMsg(void *exc);
 
-static void *VXTrigger(void) {
-    if (!g_triggerCls) {
-        const char *cand[] = { "SpawnObjectCrossHairTrigger", "CrossHairTrigger",
-                               "AimAssistTrigger", "SpawnTrigger", "CrossHairManager" };
-        for (int i = 0; i < 5; i++) {
-            void *c = VXClass("", cand[i]);
-            if (c) { g_triggerCls = c; break; }
+static BOOL VXDictOK(void *dict) {
+    if (!VXPtr(dict)) return NO;
+    char *e = *(char **)((char *)dict + 0x18);
+    int c = *(int *)((char *)dict + 0x20);
+    return VXPtr(e) && c > 0 && c <= 512;
+}
+
+static void *VXFindDict(void) {
+    if (g_dictField) {
+        void *d = NULL;
+        p_field_static_get_value(g_dictField, &d);
+        if (VXDictOK(d)) return d;
+    }
+
+    NSTimeInterval ahora = [NSDate timeIntervalSinceReferenceDate];
+    if (g_lastScan && ahora - g_lastScan < 2.0) return NULL;
+    g_lastScan = ahora;
+
+    if (!p_image_class_count || !p_image_get_class || !p_class_get_fields ||
+        !p_field_get_type || !p_type_get_name || !p_field_get_flags) {
+        g_dbg = @"falta api dict";
+        return NULL;
+    }
+
+    size_t n = 0;
+    void **as = p_domain_get_assemblies(p_domain_get(), &n);
+    if (!as) return NULL;
+
+    int prob = 0;
+    for (size_t i = 0; i < n; i++) {
+        void *a = VXAsmAt(as, i);
+        if (!a) continue;
+        void *img = p_assembly_get_image(a);
+        if (!img) continue;
+
+        size_t cc = p_image_class_count(img);
+        for (size_t k = 0; k < cc; k++) {
+            void *cls = p_image_get_class(img, (uint32_t)k);
+            if (!cls) continue;
+            const char *cn = p_class_get_name(cls);
+            if (!cn) continue;
+            if (!(strstr(cn, "Spawn") || strstr(cn, "Manager") ||
+                  strstr(cn, "Entity") || strstr(cn, "Player") ||
+                  strstr(cn, "CrossHair"))) continue;
+            prob++;
+
+            void *it = NULL;
+            void *fd = NULL;
+            while ((fd = p_class_get_fields(cls, &it))) {
+                if (!(p_field_get_flags(fd) & 0x10)) continue;
+                void *ft = p_field_get_type(fd);
+                char *tn = ft ? p_type_get_name(ft) : NULL;
+                if (!tn || !strstr(tn, "Dictionary")) continue;
+                void *v = NULL;
+                p_field_static_get_value(fd, &v);
+                if (!VXDictOK(v)) continue;
+                g_dictField = fd;
+                g_dictCls = cls;
+                return v;
+            }
         }
     }
-    if (!g_triggerCls) { g_dbg = @"sin clase trig"; return NULL; }
+    g_dbg = [NSString stringWithFormat:@"sin dict %d", prob];
+    return NULL;
+}
+
+static void *VXTrigger(void) {
+    if (!g_triggerCls) g_triggerCls = VXClass("", "SpawnObjectCrossHairTrigger");
+    if (!g_triggerCls) return NULL;
     void *f = VXStaticField(g_triggerCls, "ActiveInstance");
-    if (!f) { g_dbg = @"sin ActiveInstance"; return NULL; }
+    if (!f) return NULL;
     void *inst = NULL;
     p_field_static_get_value(f, &inst);
-    if (!VXPtr(inst)) { g_dbg = @"inst nula"; return NULL; }
-    return inst;
+    return VXPtr(inst) ? inst : NULL;
 }
 
 static void *VXTransformOf(void *obj) {
@@ -624,10 +688,8 @@ static int VXResetGuest(NSMutableString *log) {
     void *cam = VXCamera();
     if (!cam) return;
 
-    void *trg = VXTrigger();
-    if (!trg) return;
-    void *dict = *(void **)((char *)trg + 0x50);
-    if (!VXPtr(dict)) { g_dbg = @"dict mala"; return; }
+    void *dict = VXFindDict();
+    if (!dict) return;
 
     char *entries = *(char **)((char *)dict + 0x18);
     int count = *(int *)((char *)dict + 0x20);
