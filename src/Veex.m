@@ -1,4 +1,4 @@
-// Veex.m — 3.2 (proyección con profundidad, nombre/distancia, globo arrastrable)
+// Veex.m — 3.3 (panel deslizable, proyección con profundidad, nombre/distancia)
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
 #import <QuartzCore/QuartzCore.h>
@@ -29,6 +29,7 @@ static CGSize g_sz = {926, 428};
 static UIWindow *g_win = nil;
 static UIButton *g_bub = nil;
 static UIView   *g_panel = nil;
+static UIScrollView *g_scroll = nil;
 static UIView   *g_over = nil;
 static CADisplayLink *g_link = nil;
 static NSMutableArray *g_lays = nil;
@@ -392,6 +393,7 @@ static void VXResetGuest(void) {
 - (void)btColor;
 - (void)btReset;
 - (void)btClose;
+- (void)btClearLog;
 - (void)tapBubble:(UIButton *)b;
 - (void)panBubble:(UIPanGestureRecognizer *)g;
 @end
@@ -405,7 +407,7 @@ static void VXResetGuest(void) {
 - (void)tick:(CADisplayLink *)l { VXTick(l); }
 - (void)swEsp:(UISwitch *)s {
     g_esp = s.on;
-    if (g_esp) { g_logFrames = 0; VXLog(@"=== ESP ON 3.2 ==="); }
+    if (g_esp) { g_logFrames = 0; VXLog(@"=== ESP ON 3.3 ==="); }
     else { VXLog(@"ESP OFF"); }
 }
 - (void)swBox:(UISwitch *)s  { g_box  = s.on; }
@@ -417,6 +419,10 @@ static void VXResetGuest(void) {
 - (void)btColor { g_color = (g_color + 1) % 5; }
 - (void)btReset { VXResetGuest(); }
 - (void)btClose { g_panel.hidden = YES; }
+- (void)btClearLog {
+    NSString *p = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/veex_log.txt"];
+    [[NSFileManager defaultManager] removeItemAtPath:p error:nil];
+}
 - (void)tapBubble:(UIButton *)b { g_panel.hidden = !g_panel.hidden; }
 - (void)panBubble:(UIPanGestureRecognizer *)g {
     CGPoint d = [g translationInView:g_bub.superview];
@@ -471,30 +477,56 @@ static UIButton *VXButton(CGRect f, NSString *t, SEL act) {
 
 static void VXBuildPanel(void) {
     if (g_panel) return;
-    g_panel = [[UIView alloc] initWithFrame:CGRectMake(14, 90, 280, 466)];
+    CGFloat H = MIN(560.f, [UIScreen mainScreen].bounds.size.height - 150.f);
+
+    g_panel = [[UIView alloc] initWithFrame:CGRectMake(14, 90, 280, H)];
     g_panel.backgroundColor = [UIColor colorWithRed:0.06 green:0.07 blue:0.09 alpha:0.96];
     g_panel.layer.cornerRadius = 14;
     g_panel.layer.borderWidth = 1;
     g_panel.layer.borderColor = [UIColor colorWithRed:0.10 green:0.72 blue:0.42 alpha:0.6].CGColor;
+    g_panel.clipsToBounds = YES;
     g_panel.hidden = YES;
 
-    UILabel *t = [[UILabel alloc] initWithFrame:CGRectMake(14, 10, 250, 26)];
-    t.text = @"VEEX 3.2";
+    UILabel *t = [[UILabel alloc] initWithFrame:CGRectMake(14, 8, 250, 26)];
+    t.text = @"VEEX 3.3";
     t.textColor = [UIColor colorWithRed:0.10 green:0.72 blue:0.42 alpha:1];
     t.font = [UIFont boldSystemFontOfSize:17];
     [g_panel addSubview:t];
 
-    [g_panel addSubview:VXRow(40,  @"ESP",       g_esp,  @selector(swEsp:))];
-    [g_panel addSubview:VXRow(80,  @"Caja",      g_box,  @selector(swBox:))];
-    [g_panel addSubview:VXRow(120, @"Línea",     g_line, @selector(swLine:))];
-    [g_panel addSubview:VXRow(160, @"Nombre",    g_name, @selector(swName:))];
-    [g_panel addSubview:VXRow(200, @"Distancia", g_dist, @selector(swDist:))];
-    [g_panel addSubview:VXSlider(244, @"FOV",    40.f, 110.f, g_fov,   @selector(slFov:))];
-    [g_panel addSubview:VXSlider(306, @"Escala", 0.3f, 2.5f,  g_scale, @selector(slScale:))];
+    g_scroll = [[UIScrollView alloc] initWithFrame:CGRectMake(0, 40, 280, H - 88)];
+    g_scroll.showsVerticalScrollIndicator = YES;
+    g_scroll.alwaysBounceVertical = YES;
+    g_scroll.contentInset = UIEdgeInsetsMake(0, 0, 16, 0);
+    [g_panel addSubview:g_scroll];
 
-    [g_panel addSubview:VXButton(CGRectMake(14, 372, 122, 40), @"COLOR",       @selector(btColor))];
-    [g_panel addSubview:VXButton(CGRectMake(144, 372, 122, 40), @"RESET GUEST", @selector(btReset))];
-    [g_panel addSubview:VXButton(CGRectMake(14, 418, 252, 36), @"CERRAR",      @selector(btClose))];
+    NSArray *defs = @[
+        @[@"ESP",       @(g_esp),  NSStringFromSelector(@selector(swEsp:))],
+        @[@"Caja",      @(g_box),  NSStringFromSelector(@selector(swBox:))],
+        @[@"Línea",     @(g_line), NSStringFromSelector(@selector(swLine:))],
+        @[@"Nombre",    @(g_name), NSStringFromSelector(@selector(swName:))],
+        @[@"Distancia", @(g_dist), NSStringFromSelector(@selector(swDist:))]
+    ];
+
+    CGFloat y = 0;
+    for (NSArray *d in defs) {
+        [g_scroll addSubview:VXRow(y, d[0], [d[1] boolValue], NSSelectorFromString(d[2]))];
+        y += 40;
+    }
+
+    [g_scroll addSubview:VXSlider(y + 4,  @"FOV",    40.f, 110.f, g_fov,   @selector(slFov:))];
+    y += 62;
+    [g_scroll addSubview:VXSlider(y + 4,  @"Escala", 0.3f, 2.5f,  g_scale, @selector(slScale:))];
+    y += 62;
+
+    [g_scroll addSubview:VXButton(CGRectMake(14, y + 6, 122, 40), @"COLOR",       @selector(btColor))];
+    [g_scroll addSubview:VXButton(CGRectMake(144, y + 6, 122, 40), @"RESET GUEST", @selector(btReset))];
+    y += 52;
+    [g_scroll addSubview:VXButton(CGRectMake(14, y + 6, 252, 36), @"BORRAR LOG",   @selector(btClearLog))];
+    y += 46;
+
+    g_scroll.contentSize = CGSizeMake(280, y + 16);
+
+    [g_panel addSubview:VXButton(CGRectMake(14, H - 44, 252, 34), @"CERRAR", @selector(btClose))];
 }
 
 static void VXBuildBubble(UIWindow *w) {
@@ -557,7 +589,7 @@ static void VXStart(void) {
                 VXMount();
             }];
     });
-    VXLog(@"menu montado 3.2");
+    VXLog(@"menu montado 3.3");
 }
 
 __attribute__((constructor))
