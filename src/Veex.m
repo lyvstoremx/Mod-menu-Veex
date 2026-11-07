@@ -1,4 +1,4 @@
-// 3.7
+// 3.8
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
 #import <QuartzCore/QuartzCore.h>
@@ -376,28 +376,28 @@ static void VXTick(CADisplayLink *l) {
     if (g_hud) g_hud.text = [NSString stringWithFormat:@"F%d M%d X%d C%d n%d P%d D%d A%d", F,M,X,C,n,P,D, hasT&&g_aim];
 }
 
-static BOOL VXAccName(NSString *n) {
-    NSString *l = n.lowercaseString;
-    for (NSString *s in @[@"account", @"guest", @"ffacc", @"login", @"session", @"uid", @"user"])
-        if ([l containsString:s]) return YES;
-    return NO;
+static void VXWipeDir(NSString *d) {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    BOOL isDir = NO;
+    for (NSString *f in [fm contentsOfDirectoryAtPath:d error:nil]) {
+        if ([f isEqualToString:@"veex_log.txt"]) continue;
+        NSString *p = [d stringByAppendingPathComponent:f];
+        if ([fm fileExistsAtPath:p isDirectory:&isDir] && isDir) VXWipeDir(p);
+        [fm removeItemAtPath:p error:nil];
+    }
 }
-static void VXResetGuest(void) {
+static void VXResetGuest(BOOL duro) {
     NSFileManager *fm = [NSFileManager defaultManager];
     NSString *home = NSHomeDirectory();
-    NSString *docs = [home stringByAppendingPathComponent:@"Documents"];
-    for (NSString *f in [fm contentsOfDirectoryAtPath:docs error:nil]) {
-        if (!VXAccName(f)) continue;
-        [fm removeItemAtPath:[docs stringByAppendingPathComponent:f] error:nil];
-    }
-    NSString *bid = [NSBundle mainBundle].bundleIdentifier;
-    if (bid) {
-        [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bid];
-        [[NSUserDefaults standardUserDefaults] synchronize];
-        [fm removeItemAtPath:[home stringByAppendingPathComponent:[NSString stringWithFormat:@"Library/Preferences/%@.plist", bid]] error:nil];
+    VXWipeDir([home stringByAppendingPathComponent:@"Documents"]);
+    VXWipeDir([home stringByAppendingPathComponent:@"Library/Preferences"]);
+    if (duro) {
+        VXWipeDir([home stringByAppendingPathComponent:@"Library/Caches"]);
+        VXWipeDir(NSTemporaryDirectory());
     }
     SecItemDelete((__bridge CFDictionaryRef)@{(__bridge id)kSecClass:(__bridge id)kSecClassGenericPassword});
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6*NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ exit(0); });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6*NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{ exit(0); });
 }
 
 @interface VXHost : NSObject
@@ -407,7 +407,7 @@ static void VXResetGuest(void) {
 - (void)swLine:(UISwitch *)s; - (void)swName:(UISwitch *)s;
 - (void)swDist:(UISwitch *)s; - (void)swAim:(UISwitch *)s;
 - (void)slFov:(UISlider *)s; - (void)slScale:(UISlider *)s;
-- (void)btColor; - (void)btReset; - (void)btClose;
+- (void)btColor; - (void)btReset; - (void)btHard; - (void)btClose;
 - (void)tapBubble:(id)b; - (void)panBubble:(UIPanGestureRecognizer *)g;
 @end
 @implementation VXHost
@@ -417,7 +417,10 @@ static void VXResetGuest(void) {
 - (void)swLine:(UISwitch *)s { g_line=s.on; } - (void)swName:(UISwitch *)s { g_name=s.on; }
 - (void)swDist:(UISwitch *)s { g_dist=s.on; } - (void)swAim:(UISwitch *)s { g_aim=s.on; }
 - (void)slFov:(UISlider *)s { g_fov=s.value; } - (void)slScale:(UISlider *)s { g_scale=s.value; }
-- (void)btColor { g_color=(g_color+1)%5; } - (void)btReset { VXResetGuest(); } - (void)btClose { g_panel.hidden=YES; }
+- (void)btColor { g_color=(g_color+1)%5; }
+- (void)btReset { VXResetGuest(NO); }
+- (void)btHard { VXResetGuest(YES); }
+- (void)btClose { g_panel.hidden=YES; }
 - (void)tapBubble:(id)b { g_panel.hidden=!g_panel.hidden; }
 - (void)panBubble:(UIPanGestureRecognizer *)g {
     CGPoint d=[g translationInView:g_bub.superview];
@@ -481,6 +484,7 @@ static void VXBuildPanel(void) {
     [g_scroll addSubview:VXSlider(y+4,@"Escala",0.3,2.5,g_scale,@selector(slScale:))]; y+=62;
     [g_scroll addSubview:VXButton(CGRectMake(14,y+6,122,40),@"COLOR",@selector(btColor))];
     [g_scroll addSubview:VXButton(CGRectMake(144,y+6,122,40),@"RESET",@selector(btReset))]; y+=52;
+    [g_scroll addSubview:VXButton(CGRectMake(14,y+6,252,36),@"RESET DURO",@selector(btHard))]; y+=46;
     g_scroll.contentSize=CGSizeMake(280,y+16);
     [g_panel addSubview:VXButton(CGRectMake(14,H-44,252,34),@"CERRAR",@selector(btClose))];
 }
