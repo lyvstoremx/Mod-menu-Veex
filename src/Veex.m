@@ -1,4 +1,4 @@
-// Veex.m — 3.3 (panel deslizable, proyección con profundidad, nombre/distancia)
+// Veex.m — 3.4 (reset solo de cuenta, panel deslizable, proyección con profundidad)
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
 #import <QuartzCore/QuartzCore.h>
@@ -354,28 +354,41 @@ static void VXTick(CADisplayLink *l) {
     if (g_logFrames < 4) g_logFrames++;
 }
 
-#pragma mark - reset guest
+#pragma mark - reset guest (solo cuenta)
 
-static void VXWipeDir(NSString *d) {
-    NSFileManager *fm = [NSFileManager defaultManager];
-    BOOL isDir = NO;
-    for (NSString *f in [fm contentsOfDirectoryAtPath:d error:nil]) {
-        if ([f isEqualToString:@"veex_log.txt"]) continue;
-        NSString *p = [d stringByAppendingPathComponent:f];
-        if ([fm fileExistsAtPath:p isDirectory:&isDir] && isDir) VXWipeDir(p);
-        [fm removeItemAtPath:p error:nil];
-    }
+static BOOL VXAccName(NSString *n) {
+    NSString *l = n.lowercaseString;
+    NSArray *k = @[@"account", @"guest", @"ffacc", @"login", @"session", @"uid", @"user"];
+    for (NSString *s in k)
+        if ([l containsString:s]) return YES;
+    return NO;
 }
 
 static void VXResetGuest(void) {
-    NSString *h = NSHomeDirectory();
-    VXWipeDir([h stringByAppendingPathComponent:@"Documents"]);
-    VXWipeDir([h stringByAppendingPathComponent:@"Library"]);
-    VXWipeDir(NSTemporaryDirectory());
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *home = NSHomeDirectory();
+    NSString *docs = [home stringByAppendingPathComponent:@"Documents"];
+
+    for (NSString *f in [fm contentsOfDirectoryAtPath:docs error:nil]) {
+        if (!VXAccName(f)) continue;
+        [fm removeItemAtPath:[docs stringByAppendingPathComponent:f] error:nil];
+    }
+
+    NSString *bid = [NSBundle mainBundle].bundleIdentifier;
+    if (bid) {
+        [[NSUserDefaults standardUserDefaults] removePersistentDomainForName:bid];
+        [[NSUserDefaults standardUserDefaults] synchronize];
+        NSString *pl = [home stringByAppendingPathComponent:
+                        [NSString stringWithFormat:@"Library/Preferences/%@.plist", bid]];
+        [fm removeItemAtPath:pl error:nil];
+    }
+
     NSDictionary *q = @{ (__bridge id)kSecClass : (__bridge id)kSecClassGenericPassword };
     SecItemDelete((__bridge CFDictionaryRef)q);
-    usleep(400000);
-    _exit(0);
+
+    VXLog(@"reset guest: solo cuenta");
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{ exit(0); });
 }
 
 #pragma mark - host
@@ -407,7 +420,7 @@ static void VXResetGuest(void) {
 - (void)tick:(CADisplayLink *)l { VXTick(l); }
 - (void)swEsp:(UISwitch *)s {
     g_esp = s.on;
-    if (g_esp) { g_logFrames = 0; VXLog(@"=== ESP ON 3.3 ==="); }
+    if (g_esp) { g_logFrames = 0; VXLog(@"=== ESP ON 3.4 ==="); }
     else { VXLog(@"ESP OFF"); }
 }
 - (void)swBox:(UISwitch *)s  { g_box  = s.on; }
@@ -488,7 +501,7 @@ static void VXBuildPanel(void) {
     g_panel.hidden = YES;
 
     UILabel *t = [[UILabel alloc] initWithFrame:CGRectMake(14, 8, 250, 26)];
-    t.text = @"VEEX 3.3";
+    t.text = @"VEEX 3.4";
     t.textColor = [UIColor colorWithRed:0.10 green:0.72 blue:0.42 alpha:1];
     t.font = [UIFont boldSystemFontOfSize:17];
     [g_panel addSubview:t];
@@ -589,7 +602,7 @@ static void VXStart(void) {
                 VXMount();
             }];
     });
-    VXLog(@"menu montado 3.3");
+    VXLog(@"menu montado 3.4");
 }
 
 __attribute__((constructor))
