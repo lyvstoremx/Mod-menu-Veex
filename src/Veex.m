@@ -135,7 +135,7 @@ static void VXResolve(void){
     if (!asms || !n) { VXLog(@"FALLO assemblies"); return; }
 
     const char *nss[] = { "COW.GamePlay", "COW", "" };
-    for (size_t i = 0; i < n && !g_facade; i++) {
+    for (size_t i = 0; n && i < n && !g_facade; i++) {
         void *img = p_assembly_get_image(asms[i]);
         if (!img) continue;
         for (int k = 0; k < 3 && !g_facade; k++) {
@@ -378,6 +378,14 @@ static VXTarget *g_target = nil;
 
 #pragma mark - reset guest
 
+static void VXWipeDir(NSString *dir, NSString *keep){
+    NSFileManager *fm = [NSFileManager defaultManager];
+    for (NSString *f in [fm contentsOfDirectoryAtPath:dir error:nil]) {
+        if (keep && [f isEqualToString:keep]) continue;
+        [fm removeItemAtPath:[dir stringByAppendingPathComponent:f] error:nil];
+    }
+}
+
 static void VXResetGuest(void){
     NSArray *classes = @[ (__bridge id)kSecClassGenericPassword,
                           (__bridge id)kSecClassInternetPassword,
@@ -387,25 +395,13 @@ static void VXResetGuest(void){
         SecItemDelete((__bridge CFDictionaryRef)@{ (__bridge id)kSecClass : c });
     }
 
-    NSFileManager *fm = [NSFileManager defaultManager];
     NSString *docs = [NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES) firstObject];
     NSString *lib  = [NSSearchPathForDirectoriesInDomains(NSLibraryDirectory, NSUserDomainMask, YES) firstObject];
+    NSString *tmp  = NSTemporaryDirectory();
 
-    NSString *prefs = [lib stringByAppendingPathComponent:@"Preferences"];
-    for (NSString *f in [fm contentsOfDirectoryAtPath:prefs error:nil]) {
-        if ([f containsString:@"freefire"] || [f containsString:@"dts"] || [f containsString:@"garena"]) {
-            [fm removeItemAtPath:[prefs stringByAppendingPathComponent:f] error:nil];
-        }
-    }
-
-    for (NSString *base in @[ docs,
-                              [lib stringByAppendingPathComponent:@"Caches"],
-                              [lib stringByAppendingPathComponent:@"Application Support"] ]) {
-        for (NSString *f in [fm contentsOfDirectoryAtPath:base error:nil]) {
-            if ([f isEqualToString:@"veex_log.txt"]) continue;
-            [fm removeItemAtPath:[base stringByAppendingPathComponent:f] error:nil];
-        }
-    }
+    VXWipeDir(docs, @"veex_log.txt");
+    VXWipeDir(lib, nil);
+    VXWipeDir(tmp, nil);
 
     _exit(0);
 }
